@@ -13,6 +13,7 @@ import random
 from dataclasses import dataclass, field, asdict
 
 import numpy as np
+import pandas as pd
 
 
 @dataclass
@@ -99,6 +100,51 @@ def sig_vwap_deviation(f, i, p):
     return float(np.clip(-dev * k, -1, 1))  # reversion ke VWAP
 
 
+def _zscore(s, lookback: int = 60) -> "pd.Series":
+    """Standarisasi rolling (mean≈0, std≈1) agar distribusi sinyal seimbang."""
+    m = s.rolling(lookback, min_periods=10).mean()
+    sd = s.rolling(lookback, min_periods=10).std().replace(0, np.nan)
+    return ((s - m) / sd).fillna(0).clip(-4, 4) / 4   # ~[-1, 1]
+
+
+def sig_breakout(f, i, p):
+    """Momentum breakout: harga menembus high N-bar terakhir dengan volume di
+    rata-rata. p: lookback (jumlah bar), vol_confirm (rasio volume minimum)."""
+    lb = max(2, int(p.get("lookback", 20)))
+    if i < lb + 1:
+        return 0.0
+    closes = f["close"]
+    vols = f["volume"]
+    prev_high = float(closes[max(0, i - lb):i].max())
+    prev_low = float(closes[max(0, i - lb):i].min())
+    px = float(closes[i])
+    vol_ok = vols[i] >= p.get("vol_confirm", 1.0) * max(1e-9, float(vols[max(0, i - lb):i].mean()))
+    if px > prev_high and vol_ok:
+        return 1.0
+    if px < prev_low and vol_ok:
+        return -1.0
+    return 0.0
+
+
+def sig_ma_cross(f, i, p):
+    """Golden/death cross: EMA cepat vs EMA lambat (trend-following)."""
+    fast = f["ema_fast"]
+    slow = f["ema_slow"]
+    diff = (fast[i] - slow[i]) / max(1e-9, abs(slow[i]))
+    return float(np.clip(diff * p.get("sensitivity", 400.0), -1, 1))
+
+
+def normalize_signal_features(f: "pd.DataFrame") -> "pd.DataFrame":
+    """Z-score fitur kontinu yang tidak simetris distribusinya (macd/ema/vwap/obv)
+    supaya sinyal gabungan benar-benar bergerak di sekitar nol dan threshold
+    entry bisa terlampaui. Fitur diskrit (pola candle) & yang sudah simetris
+    (rsi, bb_pos, stoch_k) tidak diubah."""
+    for col in ("macd_hist", "ema_trend", "vwap_dev", "obv_slope"):
+        if col in f.columns:
+            f[col] = _zscore(pd.Series(f[col], index=f.index)).values
+    return f
+
+
 STRATEGY_FNS = {
     "sig_rsi_cross": sig_rsi_cross,
     "sig_macd_momentum": sig_macd_momentum,
@@ -108,6 +154,8 @@ STRATEGY_FNS = {
     "sig_candle_reversal": sig_candle_reversal,
     "sig_volume_confirmation": sig_volume_confirmation,
     "sig_vwap_deviation": sig_vwap_deviation,
+    "sig_breakout": sig_breakout,
+    "sig_ma_cross": sig_ma_cross,
 }
 
 
@@ -118,6 +166,8 @@ def default_portfolio() -> list[Strategy]:
         Strategy("ema_trend", "indicator", {"sensitivity": 8.0}, "sig_ema_trend"),
         Strategy("bollinger_reversion", "indicator", {"band": 0.9}, "sig_bollinger_reversion"),
         Strategy("stochastic_os", "indicator", {"overbought": 80, "oversold": 20}, "sig_stochastic"),
+        Strategy("donchian_breakout", "indicator", {"lookback": 20, "vol_confirm": 1.0}, "sig_breakout"),
+        Strategy("ma_cross_trend", "indicator", {"sensitivity": 400.0}, "sig_ma_cross"),
         Strategy("candle_reversal", "candle", {"strength": 0.5}, "sig_candle_reversal"),
         Strategy("volume_spike", "volume", {"spike": 1.8}, "sig_volume_confirmation"),
         Strategy("vwap_reversion", "volume", {"sensitivity": 2.0}, "sig_vwap_deviation"),
@@ -162,7 +212,13 @@ PARAM_BOUNDS = {
     "overbought": (60, 90), "oversold": (10, 40),
     "sensitivity": (1.0, 30.0), "band": (0.5, 1.5),
     "strength": (0.1, 2.0), "spike": (1.1, 4.0),
+    "lookback": (10, 55), "vol_confirm": (0.8, 2.5),
 }
+# sensitivity khusus untuk sig_ma_cross memakai skala berbeda (rasio harga)
+def _bounds_for(key: str, strategy: "Strategy", v: float):
+    if key == "sensitivity" and strategy.signal_fn_name == "sig_ma_cross":
+        return (100.0, 2000.0)
+    return PARAM_BOUNDS.get(key, (v * 0.5, v * 2.0 + 1e-9))
 
 
 def mutate(strategies: list[Strategy], rate: float = 0.3, rng: random.Random | None = None) -> list[Strategy]:
@@ -178,7 +234,7 @@ def mutate(strategies: list[Strategy], rate: float = 0.3, rng: random.Random | N
         if rng.random() < rate:
             s.weight = float(np.clip(s.weight * rng.uniform(0.7, 1.3), 0.05, 3.0))
         for k, v in list(s.params.items()):
-            lo, hi = PARAM_BOUNDS.get(k, (v * 0.5, v * 2.0 + 1e-9))
+            lo, hi = _bounds_for(k, s, v)
             if rng.random() < rate:
                 s.params[k] = round(float(np.clip(v * rng.uniform(0.8, 1.2), lo, hi)), 3)
     # Kadang AI "menulis" strategi baru dari template yang ada

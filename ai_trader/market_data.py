@@ -142,8 +142,42 @@ def build_ohlcv_from_trades(trades: list[dict], period_min: int) -> pd.DataFrame
     return g[["time", "open", "high", "low", "close", "volume"]].sort_values("time").reset_index(drop=True)
 
 
+_INTERVAL_MAP = {  # menit Indodax -> interval Binance-IDR
+    "1": "1m", "5": "5m", "15": "15m", "30": "30m",
+    "60": "1h", "1h": "1h", "4": "4h", "240": "4h", "1d": "1d", "1440": "1d",
+}
+
+
+def _binance_idr_klines(symbol: str, interval: str, limit: int) -> pd.DataFrame | None:
+    """Sumber cadangan: candle historis ASLI pasar IDR Binance (mesin harga yang
+    sama dengan Indodax sejak akuisisi 2022). Dipakai karena API publik Indodax
+    v1 tidak menyediakan endpoint candle historis."""
+    for host in ("https://api.binance.info", "https://data-api.binance.vision",
+                 "https://api.binance.com"):
+        try:
+            r = requests.get(f"{host}/api/v3/klines",
+                             params={"symbol": symbol, "interval": interval,
+                                     "limit": min(int(limit), 1000)},
+                             headers=HEADERS, timeout=TIMEOUT)
+            if not r.ok:
+                continue
+            rows = r.json()
+            if not isinstance(rows, list) or len(rows) < 30:
+                continue
+            df = pd.DataFrame([{
+                "time": pd.to_datetime(int(k[0]), unit="ms"),
+                "open": float(k[1]), "high": float(k[2]),
+                "low": float(k[3]), "close": float(k[4]), "volume": float(k[5]),
+            } for k in rows])
+            return df.sort_values("time").reset_index(drop=True)
+        except Exception:
+            continue
+    return None
+
+
 def get_ohlcv(pair: str = "btc_idr", period: str = "60", limit: int = 500) -> pd.DataFrame | None:
-    """Candle OHLCV: coba endpoint v2 bila tersedia, jika tidak agregasi tick asli."""
+    """Candle OHLCV: coba endpoint v2 Indodax, lalu mirror Binance-IDR,
+    terakhir agregasi tick transaksi asli Indodax."""
     p = normalize_pair(pair)
     # 1) percobaan endpoint v2 (beberapa wilayah/versi menyediakan)
     try:
@@ -161,12 +195,13 @@ def get_ohlcv(pair: str = "btc_idr", period: str = "60", limit: int = 500) -> pd
                     return df
     except Exception:
         pass
-    # 2) bangun candle dari riwayat transaksi asli (API v1 /trades)
-    try:
-        period_min = max(1, int(float(period)))
-    except (TypeError, ValueError):
-        period_min = 60
-    # bangun candle dari riwayat transaksi asli (API v1 /trades)
+    # 2) mirror resmi Binance-IDR (harga asli, mesin likuiditas yang sama)
+    base_asset = p.split("_")[0].upper()
+    interval = _INTERVAL_MAP.get(str(period).lower(), "1h")
+    df = _binance_idr_klines(f"{base_asset}IDR", interval, limit)
+    if df is not None:
+        return df.tail(limit).reset_index(drop=True)
+    # 3) bangun candle dari riwayat transaksi asli (API v1 /trades)
     try:
         period_min = max(1, int(float(period)))
     except (TypeError, ValueError):

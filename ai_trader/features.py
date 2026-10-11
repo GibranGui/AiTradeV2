@@ -114,10 +114,17 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     line, sig, hist = macd(close)
     f["macd_hist"] = (hist / close).replace([np.inf, -np.inf], 0).clip(-0.05, 0.05) * 20
     f["ema_trend"] = ((ema(close, 12) - ema(close, 50)) / close).clip(-0.05, 0.05) * 20
+    # kolom mentah untuk strategi breakout / MA-cross (bukan hasil normalisasi)
+    f["close"] = close.values
+    f["volume"] = df["volume"].values
+    f["ema_fast"] = ema(close, 9).values
+    f["ema_slow"] = ema(close, 26).values
     mid, ub, lb = bollinger(close)
     f["bb_pos"] = ((close - lb) / (ub - lb).replace(0, np.nan) * 2 - 1).clip(-2, 2).fillna(0)
     f["stoch_k"] = (stochastic(df) - 50) / 50
-    f["atr_pct"] = (atr(df) / close * 100).clip(0, 10) / 5 - 1
+    atr_raw = atr(df) / close                     # rasio ATR terhadap harga (mentah)
+    f["atr_raw"] = atr_raw.clip(0, 0.2).fillna(0)
+    f["atr_pct"] = (atr_raw * 100).clip(0, 10) / 5 - 1
 
     cp = candle_patterns(df)
     for col in FEATURE_GROUPS["candle"]:

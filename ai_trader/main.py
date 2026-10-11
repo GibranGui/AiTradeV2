@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from ai_trader.market_data import fetch_ohlcv_or_synthetic, get_ticker
 from ai_trader.features import build_features
+from ai_trader.strategies.portfolio import normalize_signal_features
 from ai_trader.strategies.portfolio import (
     Strategy, combined_signal, load_portfolio, save_portfolio,
 )
@@ -56,7 +57,7 @@ def run_loop(pair: str, interval_min: int, poll_sec: int, evolve_every: int):
     strategies = load_portfolio()
 
     df, is_live = fetch_ohlcv_or_synthetic(pair, period=str(interval_min), limit=400)
-    features = build_features(df)
+    features = normalize_signal_features(build_features(df))
     print_banner(pair, is_live)
     print(f"Kas awal: Rp {broker.cash_idr:,.0f} | Strategi aktif: {len(strategies)}")
     print(f"Brain: thr={brain['entry_threshold']:.2f} SL={brain['stop_loss_pct']:.2%} "
@@ -70,7 +71,7 @@ def run_loop(pair: str, interval_min: int, poll_sec: int, evolve_every: int):
             # refresh data pasar secara berkala
             if cycle % 10 == 1 or not is_live:
                 df, is_live = fetch_ohlcv_or_synthetic(pair, period=str(interval_min), limit=400)
-                features = build_features(df)
+                features = normalize_signal_features(build_features(df))
 
             price = broker.current_price(pair)
             if price is None and len(df):
@@ -119,7 +120,7 @@ def run_loop(pair: str, interval_min: int, poll_sec: int, evolve_every: int):
             # ---- evolusi mandiri berkala ----
             if time.time() - last_evolve > evolve_every * 60:
                 print("  >> AI melakukan evolusi strategi (backtest self-improvement)...")
-                strategies, res = evolve(strategies, features, df, brain)
+                strategies, res = evolve(strategies, df, features, brain)
                 save_portfolio(strategies)
                 last_evolve = time.time()
                 print(f"     hasil evolusi: return={res['return_pct']:+.2f}% "
@@ -138,12 +139,12 @@ def do_evolve(pair: str, interval_min: int):
     brain = load_brain()
     strategies = load_portfolio()
     df, is_live = fetch_ohlcv_or_synthetic(pair, period=str(interval_min), limit=600)
-    features = build_features(df)
+    features = normalize_signal_features(build_features(df))
     print(f"Evolusi pada {pair} ({'live' if is_live else 'sintetis'}), {len(df)} candle...")
-    before = run_backtest(strategies, features, df, brain)
+    before = run_backtest(strategies, df, features, brain)
     print(f"  sebelum : return={before['return_pct']:+.2f}% winrate={before['win_rate']:.0%} "
           f"fitness={before['fitness']:.2f}")
-    strategies, after = evolve(strategies, features, df, brain)
+    strategies, after = evolve(strategies, df, features, brain)
     print(f"  sesudah : return={after['return_pct']:+.2f}% winrate={after['win_rate']:.0%} "
           f"fitness={after['fitness']:.2f}")
     save_portfolio(strategies)

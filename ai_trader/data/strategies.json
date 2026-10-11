@@ -3,12 +3,12 @@
     "name": "rsi_reversal",
     "group": "indicator",
     "params": {
-      "overbought": 70,
-      "oversold": 30
+      "overbought": 77.636,
+      "oversold": 25.855
     },
     "signal_fn_name": "sig_rsi_cross",
-    "weight": 1.2490151808278935,
-    "fitness": 0.0,
+    "weight": 1.0,
+    "fitness": -130.503,
     "wins": 0,
     "losses": 0
   },
@@ -16,11 +16,11 @@
     "name": "macd_momentum",
     "group": "indicator",
     "params": {
-      "sensitivity": 10.0
+      "sensitivity": 12.61
     },
     "signal_fn_name": "sig_macd_momentum",
-    "weight": 1.3906296484213994,
-    "fitness": 0.0,
+    "weight": 1.005692232658785,
+    "fitness": -130.503,
     "wins": 0,
     "losses": 0
   },
@@ -28,11 +28,11 @@
     "name": "ema_trend",
     "group": "indicator",
     "params": {
-      "sensitivity": 6.533
+      "sensitivity": 8.243
     },
     "signal_fn_name": "sig_ema_trend",
-    "weight": 1.2196442924143869,
-    "fitness": 0.0,
+    "weight": 1.0,
+    "fitness": -130.503,
     "wins": 0,
     "losses": 0
   },
@@ -40,11 +40,11 @@
     "name": "bollinger_reversion",
     "group": "indicator",
     "params": {
-      "band": 0.923
+      "band": 1.056
     },
     "signal_fn_name": "sig_bollinger_reversion",
-    "weight": 0.7362123362308018,
-    "fitness": 0.0,
+    "weight": 1.2564940827550044,
+    "fitness": -130.503,
     "wins": 0,
     "losses": 0
   },
@@ -52,12 +52,37 @@
     "name": "stochastic_os",
     "group": "indicator",
     "params": {
-      "overbought": 60.0,
-      "oversold": 20
+      "overbought": 89.538,
+      "oversold": 20.448
     },
     "signal_fn_name": "sig_stochastic",
-    "weight": 1.0,
-    "fitness": 0.0,
+    "weight": 1.3772422935199335,
+    "fitness": -130.503,
+    "wins": 0,
+    "losses": 0
+  },
+  {
+    "name": "donchian_breakout",
+    "group": "indicator",
+    "params": {
+      "lookback": 22.695,
+      "vol_confirm": 1.163
+    },
+    "signal_fn_name": "sig_breakout",
+    "weight": 1.1356935688099132,
+    "fitness": -130.503,
+    "wins": 0,
+    "losses": 0
+  },
+  {
+    "name": "ma_cross_trend",
+    "group": "indicator",
+    "params": {
+      "sensitivity": 467.125
+    },
+    "signal_fn_name": "sig_ma_cross",
+    "weight": 0.8180808927717803,
+    "fitness": -130.503,
     "wins": 0,
     "losses": 0
   },
@@ -65,11 +90,11 @@
     "name": "candle_reversal",
     "group": "candle",
     "params": {
-      "strength": 0.404
+      "strength": 0.684
     },
     "signal_fn_name": "sig_candle_reversal",
-    "weight": 1.023945034642196,
-    "fitness": 0.0,
+    "weight": 1.082785334980585,
+    "fitness": -130.503,
     "wins": 0,
     "losses": 0
   },
@@ -77,11 +102,11 @@
     "name": "volume_spike",
     "group": "volume",
     "params": {
-      "spike": 1.528
+      "spike": 1.739
     },
     "signal_fn_name": "sig_volume_confirmation",
-    "weight": 1.1029792617579908,
-    "fitness": 0.0,
+    "weight": 1.2967540213858113,
+    "fitness": -130.503,
     "wins": 0,
     "losses": 0
   },
@@ -89,11 +114,11 @@
     "name": "vwap_reversion",
     "group": "volume",
     "params": {
-      "sensitivity": 1.939
+      "sensitivity": 2.0
     },
     "signal_fn_name": "sig_vwap_deviation",
-    "weight": 1.0,
-    "fitness": 0.0,
+    "weight": 1.2822496104303998,
+    "fitness": -130.503,
     "wins": 0,
     "losses": 0
   }

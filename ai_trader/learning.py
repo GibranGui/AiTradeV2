@@ -25,7 +25,7 @@ EXPERIENCE_PATH = os.path.join(DATA_DIR, "experience_buffer.jsonl")
 BRAIN_PATH = os.path.join(DATA_DIR, "brain.json")
 
 DEFAULT_BRAIN = {
-    "entry_threshold": 0.35,   # |sinyal gabungan| minimal untuk masuk
+    "entry_threshold": 0.25,   # |sinyal gabungan| minimal untuk masuk
     "stop_loss_pct": 0.02,     # 2%
     "take_profit_pct": 0.035,  # 3.5%
     "alloc_frac": 0.5,         # fraksi kas per posisi
@@ -169,24 +169,35 @@ def learn_from_trade(trade: dict, strategies: list[Strategy], brain: dict) -> li
 
 # ================= 2. BACKTEST EVOLUSIONER (offline learning) =================
 
-def run_backtest(strategies: list[Strategy], features, df, brain: dict,
+def run_backtest(strategies: list[Strategy], df, features, brain: dict,
                  fee: float = 0.003) -> dict:
-    """Backtest walk-forward sederhana pada DataFrame OHLCV + fitur."""
+    """Backtest walk-forward sederhana pada DataFrame OHLCV + fitur.
+
+    Urutan argumen disamakan dengan combined_signal(strategies, features, i):
+    (strategies, df, features, brain).
+    """
     n = len(df)
     cash, pos_qty, entry_px = 1.0, 0.0, 0.0
     eq_curve, trades = [], []
     thr, sl, tp = brain["entry_threshold"], brain["stop_loss_pct"], brain["take_profit_pct"]
     close = df["close"].values
+    # ATR dinamis: stop-loss & take-profit mengikuti volatilitas pasar
+    atr_series = features["atr_raw"] if "atr_raw" in features else None
+    med_atr = float(np.median(atr_series[atr_series > 0])) if atr_series is not None else None
 
     for i in range(2, n):
         px = close[i]
         if pos_qty > 0:
             chg = px / entry_px - 1
             sig = combined_signal(strategies, features, i)
+            if med_atr and entry_px > 0:
+                scale = float(np.clip(atr_series[i] / med_atr, 0.5, 3.0))
+            else:
+                scale = 1.0
             exit_reason = None
-            if chg <= -sl:
+            if chg <= -sl * scale:
                 exit_reason = "stop_loss"
-            elif chg >= tp:
+            elif chg >= tp * scale:
                 exit_reason = "take_profit"
             elif sig < -thr * 0.5:
                 exit_reason = "signal_exit"
@@ -220,7 +231,7 @@ def run_backtest(strategies: list[Strategy], features, df, brain: dict,
             "fitness": fitness}
 
 
-def evolve(strategies: list[Strategy], features, df, brain: dict,
+def evolve(strategies: list[Strategy], df, features, brain: dict,
            generations: int = 6, pop: int = 4) -> tuple[list[Strategy], dict]:
     """Evolusi portofolio: uji varian bermutasi, pertahankan yang terbaik.
 
@@ -229,20 +240,20 @@ def evolve(strategies: list[Strategy], features, df, brain: dict,
     menyimpan kode konfigurasi yang lebih baik.
     """
     best = strategies
-    best_res = run_backtest(best, features, df, brain)
+    best_res = run_backtest(best, df, features, brain)
     history = [best_res]
 
     for gen in range(generations):
         candidates = [mutate(best, rate=0.35) for _ in range(pop)]
         for cand in candidates:
-            res = run_backtest(cand, features, df, brain)
+            res = run_backtest(cand, df, features, brain)
             history.append(res)
             if res["fitness"] > best_res["fitness"]:
                 best, best_res = cand, res
         # setiap generasi, beri peluang mutasi liar (exploration)
         if np.random.random() < 0.3:
             wild = mutate(best, rate=0.6)
-            res = run_backtest(wild, features, df, brain)
+            res = run_backtest(wild, df, features, brain)
             if res["fitness"] > best_res["fitness"]:
                 best, best_res = wild, res
 
