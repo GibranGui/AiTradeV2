@@ -1,0 +1,100 @@
+[
+  {
+    "name": "rsi_reversal",
+    "group": "indicator",
+    "params": {
+      "overbought": 70,
+      "oversold": 30
+    },
+    "signal_fn_name": "sig_rsi_cross",
+    "weight": 1.2490151808278935,
+    "fitness": 0.0,
+    "wins": 0,
+    "losses": 0
+  },
+  {
+    "name": "macd_momentum",
+    "group": "indicator",
+    "params": {
+      "sensitivity": 10.0
+    },
+    "signal_fn_name": "sig_macd_momentum",
+    "weight": 1.3906296484213994,
+    "fitness": 0.0,
+    "wins": 0,
+    "losses": 0
+  },
+  {
+    "name": "ema_trend",
+    "group": "indicator",
+    "params": {
+      "sensitivity": 6.533
+    },
+    "signal_fn_name": "sig_ema_trend",
+    "weight": 1.2196442924143869,
+    "fitness": 0.0,
+    "wins": 0,
+    "losses": 0
+  },
+  {
+    "name": "bollinger_reversion",
+    "group": "indicator",
+    "params": {
+      "band": 0.923
+    },
+    "signal_fn_name": "sig_bollinger_reversion",
+    "weight": 0.7362123362308018,
+    "fitness": 0.0,
+    "wins": 0,
+    "losses": 0
+  },
+  {
+    "name": "stochastic_os",
+    "group": "indicator",
+    "params": {
+      "overbought": 60.0,
+      "oversold": 20
+    },
+    "signal_fn_name": "sig_stochastic",
+    "weight": 1.0,
+    "fitness": 0.0,
+    "wins": 0,
+    "losses": 0
+  },
+  {
+    "name": "candle_reversal",
+    "group": "candle",
+    "params": {
+      "strength": 0.404
+    },
+    "signal_fn_name": "sig_candle_reversal",
+    "weight": 1.023945034642196,
+    "fitness": 0.0,
+    "wins": 0,
+    "losses": 0
+  },
+  {
+    "name": "volume_spike",
+    "group": "volume",
+    "params": {
+      "spike": 1.528
+    },
+    "signal_fn_name": "sig_volume_confirmation",
+    "weight": 1.1029792617579908,
+    "fitness": 0.0,
+    "wins": 0,
+    "losses": 0
+  },
+  {
+    "name": "vwap_reversion",
+    "group": "volume",
+    "params": {
+      "sensitivity": 1.939
+    },
+    "signal_fn_name": "sig_vwap_deviation",
+    "weight": 1.0,
+    "fitness": 0.0,
+    "wins": 0,
+    "losses": 0
+  }
+]
