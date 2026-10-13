@@ -143,14 +143,33 @@ jobs:
           # `client_payload`. Key tambahan seperti `source` ditolak GitHub dengan
           # HTTP 422 ("\"source\" is not a permitted key") — inilah penyebab run
           # #38467126756 gagal. Sumber tick harus dikirim lewat client_payload.
-          # Dispatch LANGSUNG ke Paper Trader (rantai utama, tanpa perantara).
-          gh api -X POST "repos/${{ github.repository }}/actions/workflows/paper-trader.yml/dispatches" \
-            -f ref=main -f 'inputs[pair]=scan' -f 'inputs[interval]=60' \
-            -f 'inputs[poll]=30' -f 'inputs[evolve_every]=30' || true
-          # Tick Watchdog (penjaga cadangan): source dikirim via client_payload.
-          gh api -X POST "repos/${{ github.repository }}/dispatches" \
-            -f event_type=watchdog-tick \
-            -F 'client_payload={"source":"self-loop"}' || true
+          # ── RANTAI LOOP NONSTOP (teknis final) ────────────────────────────
+          # 1) self-dispatch Paper Trader via curl + file JSON.
+          #    Catatan empiris run #38483097882: `gh api` di dalam runner TIDAK
+          #    bisa dispatch workflow lain ("Resource not accessible by
+          #    integration" 403 — GITHUB_TOKEN milik run workflow_dispatch tidak
+          #    boleh memicu workflow baru). Solusi: pakai PAT dari Secrets
+          #    BOT_PAT yang disimpan di file, JANGAN lewat argumen ps.
+          # 2) tick Watchdog via repository_dispatch (client_payload harus
+          #    objek JSON asli; -F string dari gh ditolak 422).
+          printf '{"ref":"main","inputs":{"pair":"scan","interval":"60","poll":"30","evolve_every":"30"}}' > /tmp/pt.json
+          if [ -n "${{ secrets.BOT_PAT }}" ]; then
+            curl -sf -X POST \
+              -H "Authorization: Bearer ${{ secrets.BOT_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              --data @/tmp/pt.json \
+              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/paper-trader.yml/dispatches" \
+              && echo "✅ Rantai berlanjut: Paper Trader di-dispatch ulang oleh dirinya sendiri." \
+              || echo "⚠️ Self-dispatch gagal — rantai akan disambung Watchdog/tick eksternal."
+          else
+            echo "ℹ️ Secrets BOT_PAT belum diisi — self-dispat dilewati (isi di repo Settings > Secrets)."
+          fi
+          printf '{"event_type":"watchdog-tick","client_payload":{"source":"self-loop"}}' > /tmp/wd.json
+          curl -s -o /dev/null -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            --data @/tmp/wd.json \
+            "https://api.github.com/repos/${{ github.repository }}/dispatches" || true
 
       - name: Publikasikan dashboard ke GitHub Pages (branch gh-pages)
         if: always()
