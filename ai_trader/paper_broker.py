@@ -16,6 +16,17 @@ from .market_data import get_ticker
 WALLET_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "paper_wallet.json")
 FEE = 0.003  # fee maker Indodax 0,3%
 
+# ============================================================================
+# MODE REAL (uang sungguhan) — DINONAKTIFKAN SECARA DEFAULT.
+# Untuk mengaktifkan: set env LIVE_TRADING=1 DAN konfirmasi tertulis dengan
+# membuat file data/LIVE_CONFIRM.txt berisi persis kata "SAYA PAHAM RISIKONYA".
+# API key dibaca dari env: INDODAX_API_KEY / INDODAX_API_SECRET.
+# WAJIB: buat API key Indodax HANYA dengan izin "Trade", JANGAN "Withdraw".
+# ============================================================================
+LIVE_MODE = os.environ.get("LIVE_TRADING") == "1" and os.path.exists(
+    os.path.join(os.path.dirname(__file__), "..", "data", "LIVE_CONFIRM.txt")
+)
+
 
 @dataclass
 class Position:
