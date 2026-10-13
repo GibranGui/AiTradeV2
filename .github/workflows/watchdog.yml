@@ -34,7 +34,18 @@ jobs:
         run: |
           set -e
           NOW=$(date -u +%s)
-          # waktu run 'Paper Trader' terakhir (event apa pun)
+          SRC="${{ github.event.client_payload.source }}"
+          # Tick dari loop internal (akhir siklus Paper Trader): selalu dispatch,
+          # tanpa cek umur — inilah yang membuat rantai jalan nonstop.
+          if [ "$SRC" = "self-loop" ]; then
+            gh api -X POST "repos/${{ github.repository }}/actions/workflows/paper-trader.yml/dispatches" \
+              -f ref=main -f 'inputs[pair]=scan' -f 'inputs[interval]=60' \
+              -f 'inputs[poll]=30' -f 'inputs[evolve_every]=30'
+            echo "✅ Dispatch langsung (tick self-loop, rantai berlanjut)."
+            exit 0
+          fi
+          # Tick EKSTERNAL (cronjob.org dsb): periksa umur run terakhir; dispatch
+          # hanya bila rantai tampaknya putus (>=25 menit tidak ada siklus).
           LAST=$(gh api "repos/${{ github.repository }}/actions/workflows/paper-trader.yml/runs?per_page=1" \
                  --jq '.workflow_runs[0].created_at' 2>/dev/null || true)
           if [ -z "$LAST" ]; then echo "Belum pernah ada run — dispatch."; LAST_EPOCH=0;
