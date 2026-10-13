@@ -61,9 +61,14 @@ def _binance_universe(min_vol_idr: float) -> list[dict]:
             out = []
             for t in rows:
                 sym = t["symbol"]
-                if not sym.endswith("IDR"):
+                if not (sym.endswith("IDR") or sym.endswith("BIDR")):
                     continue
-                base = sym[:-3].lower()
+                # BIDR = pasangan stablecoin rupiah Indodax (mis. SOLBIDR);
+                # normalize ke base_idr agar sama dengan format pair Indodax.
+                if sym.endswith("BIDR"):
+                    base = sym[:-4].lower()
+                else:
+                    base = sym[:-3].lower()
                 if len(base) < 2 or _is_stable_symbol(sym):
                     continue
                 # stablecoin & turunannya: usdt, usdtb, busd, busdb, dst.
@@ -74,7 +79,7 @@ def _binance_universe(min_vol_idr: float) -> list[dict]:
                     continue
                 out.append({
                     "pair": f"{base}_idr",
-                    "symbol": sym,
+                    "symbol": base.upper() + "IDR",
                     "last": float(t["lastPrice"]),
                     "chg24h_pct": float(t.get("priceChangePercent", 0)),
                     "vol_idr_24h": qv,
@@ -82,15 +87,14 @@ def _binance_universe(min_vol_idr: float) -> list[dict]:
                     "low24h": float(t.get("lowPrice", 0)),
                 })
             if out:
-                # deduplikasi "B-token" (XRPBIDR = versi bridged dari XRP): jika
-                # pasar utama <ASSET>IDR juga ada di daftar, buang duplikatnya.
-                syms = {u["symbol"] for u in out}
-                out = [u for u in out
-                       if not (u["symbol"].endswith("BIDR")
-                               and len(u["symbol"]) > 5
-                               and u["symbol"] not in ("BONKIDR",)
-                               and u["symbol"][:-4] + "IDR" in syms)]
-                return out
+                # deduplikasi jika base yang sama muncul dua kali:
+                # pilih pasar dengan volume terbesar sebagai representasi.
+                best: dict[str, dict] = {}
+                for u in out:
+                    cur = best.get(u["pair"])
+                    if cur is None or u["vol_idr_24h"] > cur["vol_idr_24h"]:
+                        best[u["pair"]] = u
+                return list(best.values())
         except Exception:
             continue
     return []
@@ -165,6 +169,17 @@ def prescreen(universe: list[dict], top_n: int,
     return [u for _, u in scored[:top_n]]
 
 
+def _passes_deep_filter(r: dict, max_chg_pct: float) -> bool:
+    """Koin layak dianalisis mendalam: sedang naik ATAU baru mulai bangkit
+    (harga dekat high 24 jam meski chg24h masih negatif — pola awal tren)."""
+    chg = r["chg24h_pct"]
+    if 0 < chg <= max_chg_pct:
+        return True
+    rng = r["high24h"] - r["low24h"]
+    near_high = rng > 0 and (r["last"] - r["low24h"]) / rng >= 0.8
+    return bool(near_high and -3.0 <= chg <= 0)
+
+
 class CoinScanner:
     """Memindai kandidat & menghitung skor peluang tren naik per koin."""
 
@@ -184,7 +199,8 @@ class CoinScanner:
             return hit[1]
         df, is_live = fetch_ohlcv_or_synthetic(
             pair, period=str(self.interval_min), limit=self.limit)
-        if df is None or len(df) < 60:
+        if df is None or len(df) < 60 or not is_live:
+            # JANGAN pernah trading/skor dari data sintetis — hanya candle asli.
             return None
         feats = normalize_signal_features(build_features(df))
         i = len(feats) - 1
@@ -221,14 +237,27 @@ class CoinScanner:
         return result
 
     def scan(self, universe: list[dict], deep_n: int = 8) -> list[dict]:
-        """Sweep -> prescreen -> analisis mendalam -> ranking final."""
-        cands = prescreen(universe, top_n=deep_n)
+        """Sweep -> prescreen -> analisis mendalam -> ranking final.
+
+        Prinsip gstack "sweep wide, act narrow": kandidat yang layak dianalisis
+        (tren naik / baru bangkit + likuid) diurutkan berdasarkan likuiditas,
+        lalu SEMUA-nya dianalisis mendalam (bukan hanya segelintir), dibatasi
+        `deep_n` sebagai pagar biaya/rate-limit — bukan sebagai batas ketat
+        ketika peluang tersebar di banyak koin.
+        """
+        cands = [u for u in universe if _passes_deep_filter(u, max_chg_pct=25.0)]
+        # fallback: jika tidak ada yang lolos filter ketat, ambil top momentum
+        if not cands:
+            cands = prescreen(universe, top_n=min(deep_n, len(universe)))
+        # urutkan prioritas: volume terbesar dulu (likuiditas = mudah exit)
+        cands.sort(key=lambda u: -u["vol_idr_24h"])
+        cands = cands[:max(deep_n, 10)]          # minimal 10 kandidat per siklus
         results = []
         for c in cands:
             r = self.analyze(c)
             if r:
                 results.append(r)
-            time.sleep(0.15)  # hemat rate-limit
+            time.sleep(0.1)  # hemat rate-limit
         results.sort(key=lambda x: -x["score"])
         return results
 

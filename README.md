@@ -60,12 +60,33 @@ python -m ai_trader.main evolve --pair IDRBTC --interval 60
 # 2) Jalankan paper trader live (harga asli Indodax, refresh tiap 30 dtk)
 python -m ai_trader.main run --pair IDRBTC --interval 60 --poll 30 --evolve-every 30
 
-# 3) Cek dompet, otak (aturan risiko), bobot strategi, dan riwayat pelajaran
+# 3) MODE MULTI-KOIN (disarankan): scan SELURUH pasar IDR tiap siklus,
+#    auto-trade koin yang terdeteksi peluang tren naik (maks 5 posisi).
+python -m ai_trader.main scan --interval 60 --poll 45 --deep 12 --min-vol 50000000
+
+# 4) Lihat daftar peluang saat ini tanpa trading (one-shot)
+python -m ai_trader.main list --deep 12 --min-vol 50000000
+
+# 5) Cek dompet, otak (aturan risiko), bobot strategi, dan riwayat pelajaran
 python -m ai_trader.main status
 ```
 
 Bot berjalan terus (Ctrl+C untuk berhenti; state tersimpan otomatis).
 Jika tidak ada internet, sistem fallback ke data sintetis agar tetap bisa diuji.
+
+## Altcoin Scanner (multi-koin, bukan satu koin saja)
+
+Terinspirasi pola pipeline *gstack* (`sweep wide → filter → rank → act`), mode `scan`:
+
+1. **Sweep** — satu request mengambil ticker 24 jam SEMUA pasar berpasangan IDR
+   (mirror resmi Binance-IDR / Indodax; ±58 pasar non-stablecoin).
+2. **Filter** — buang stablecoin & koin tak likuid (`--min-vol`, default Rp50 juta/24 jam);
+   pertahankan yang sedang naik ATAU baru bangkit (harga dekat high 24 jam).
+3. **Rank** — analisis mendalam candle OHLCV asli per kandidat (indikator + pola
+   candlestick + volume, memakai bobot strategi terpelajari AI).
+4. **Act** — beli maksimal 5 koin dengan skor tren naik tertinggi; TP/SL/trailing
+   dievaluasi tiap siklus untuk SEMUA posisi; setiap trade (untung/rugi) masuk
+   ke loop pembelajaran.
 
 ## Jalankan 24/7 dengan GitHub Actions (gratis, tanpa server)
 

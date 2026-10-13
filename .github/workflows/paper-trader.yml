@@ -8,9 +8,9 @@ on:
   workflow_dispatch:        # tombol "Run workflow" manual di tab Actions
     inputs:
       pair:
-        description: Pair Indodax
+        description: "Pair (pakai 'all' untuk mode multi-koin) atau modus: scan"
         required: false
-        default: IDRBTC
+        default: scan
       interval:
         description: Periode candle (menit)
         required: false
@@ -73,9 +73,17 @@ jobs:
           POLL: ${{ github.event.inputs.poll || '30' }}
           EVOLVE_EVERY: ${{ github.event.inputs.evolve_every || '30' }}
         run: |
-          timeout 25m python -m ai_trader.main run \
-            --pair "$PAIR" --interval "$INTERVAL" \
-            --poll "$POLL" --evolve-every "$EVOLVE_EVERY" || true
+          # PAIR = "scan"/"all" -> mode multi-koin (altcoin scanner);
+          # selain itu -> mode satu koin klasik.
+          if [ "$PAIR" = "scan" ] || [ "$PAIR" = "all" ]; then
+            timeout 25m python -m ai_trader.main scan \
+              --interval "$INTERVAL" --poll "$POLL" \
+              --evolve-every "$EVOLVE_EVERY" --min-vol 50000000 || true
+          else
+            timeout 25m python -m ai_trader.main run \
+              --pair "$PAIR" --interval "$INTERVAL" \
+              --poll "$POLL" --evolve-every "$EVOLVE_EVERY" || true
+          fi
           python -m ai_trader.main status >> bot-report.txt
 
       - name: Simpan state ke branch bot-state
