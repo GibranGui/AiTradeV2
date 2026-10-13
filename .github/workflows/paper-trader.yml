@@ -23,14 +23,6 @@ on:
         description: Menit antar-evolusi strategi
         required: false
         default: "30"
-  schedule:
-    - cron: "*/15 * * * *"   # tiap 15 menit (lihat catatan anti-overlap di bawah)
-    # ── PENTING: kenapa interval 15 menit, bukan 30? ──────────────────────────
-    # GitHub MENONDA jadwal cron saat antrian runner padat (perilaku resmi).
-    # Dengan cadence rapat, job yang terlewat cepat diganti run berikutnya.
-    # Bot dibatasi --max-minutes 20 + concurrency cancel-in-progress, sehingga
-    # siklus baru selalu menggantikan siklus lama yang masih menggantung —
-    # state tetap konsisten karena tiap run restore dari branch bot-state.
 
   schedule:
     # CATATAN PENTING (terkonfirmasi empiris di repo ini): GitHub sering TIDAK
