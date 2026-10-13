@@ -131,12 +131,16 @@ jobs:
           git commit -m "state snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           STATE_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
           git push --force "$STATE_URL" HEAD:refs/heads/bot-state
-          # RANTAI LOOP OTOMATIS: tiap akhir siklus kirim repository_dispatch
-          # -> Watchdog mengecek umur run Paper Trader terakhir; bila >=25 menit,
-          # ia men-dispatch siklus berikutnya. (Cron/schedule GitHub terbukti 0x
-          # fire di repo ini, jadi rantai dispatch inilah penggeraknya.)
+          # ── RANTAI LOOP OTOMATIS ────────────────────────────────────────────
+          # Cron/schedule GitHub terbukti 0x fire di repo ini, jadi penggeraknya
+          # adalah rantai self-dispatch berkecepatan penuh:
+          #   Paper Trader selesai -> dispatch tick -> Watchdog -> dispatch
+          #   Paper Trader lagi -> dst. Watchdog hanya memfilter saat ada tick
+          #   EKSTERNAL (source != self-loop) supaya loop internal tidak pernah
+          #   berhenti; tick eksternal (cronjob.org/curl-cron tiap :02/:32) tetap
+          #   berfungsi sebagai pemantik & penjaga kalau rantai putus.
           gh api -X POST "repos/${{ github.repository }}/dispatches" \
-            -f event_type=watchdog-tick
+            -f event_type=watchdog-tick -f source=self-loop
 
       - name: Publikasikan dashboard ke GitHub Pages (branch gh-pages)
         if: always()
