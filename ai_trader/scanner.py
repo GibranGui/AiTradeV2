@@ -1,0 +1,238 @@
+"""Altcoin Scanner — memindai SELURUH pasar IDR untuk menemukan peluang tren naik.
+
+Alih-alih hanya memantau satu koin, tiap siklus bot:
+ 1. Mengambil 24 jam ticker SEMUA pasar berpasangan IDR sekaligus (1 request).
+    Sumber utama: mirror resmi Binance-IDR (mesin likuiditas yang sama dengan
+    Indodax sejak akuisisi 2022; API publik Indodax tidak menyediakan endpoint
+    daftar-pasar). Harga eksekusi tetap memakai ticker live Indodax.
+ 2. Menyaring: minimal likuiditas (volume 24 jam), bukan stablecoin.
+ 3. Preranking cepat berbasis harga (momentum + volume) -> ambil kandidat teratas.
+ 4. Analisis mendalam per kandidat: candle OHLCV asli -> indikator, pola
+    candlestick, volume -> sinyal gabungan strategi AI (bobot terpelajari).
+ 5. Skor akhir = rata-rata momentum harga & konfluensi sinyal teknikal.
+    Kandidat dengan skor >= ambang dianggap "peluang tren naik" dan bisa dibeli.
+
+Pola desain mengikuti pendekatan pipeline gstack (sweep -> filter -> rank ->
+act) yang dikhususkan untuk pemindaian pasar kripto.
+"""
+
+from __future__ import annotations
+
+import time
+
+import numpy as np
+import pandas as pd
+import requests
+
+from .market_data import fetch_ohlcv_or_synthetic, normalize_pair
+from .features import build_features
+from .strategies.portfolio import combined_signal, normalize_signal_features
+
+BINANCE_VISION = "https://data-api.binance.vision"
+BINANCE_HOSTS = ("https://data-api.binance.info", BINANCE_VISION,
+                 "https://api.binance.com")
+HEADERS = {"User-Agent": "Mozilla/5.0 (AI-Trader-Scanner)"}
+TIMEOUT = 15
+
+# stablecoin / aset non-spekulatif — jangan pernah diperdagangkan
+STABLECOINS = {
+    "usdt", "usdc", "busd", "dai", "fdusd", "tusd", "usdp", "idrxx", "idrtb",
+    "idr", "xaut", "paxg", "tether",
+}
+
+
+def _is_stable_symbol(sym: str) -> bool:
+    """Tangkap bentuk BUSDBIDR/USDTBIDR (aset turunan stablecoin ber-suffix B)."""
+    for st in ("USDT", "USDC", "BUSD", "DAI", "FDUSD", "TUSD", "USDP"):
+        if sym == st + "IDR" or sym == st + "BIDR":
+            return True
+    return False
+
+
+def _binance_universe(min_vol_idr: float) -> list[dict]:
+    """Satu request: semua ticker 24 jam pasar IDR di Binance-IDR."""
+    for host in BINANCE_HOSTS:
+        try:
+            r = requests.get(f"{host}/api/v3/ticker/24hr",
+                             headers=HEADERS, timeout=TIMEOUT)
+            if not r.ok:
+                continue
+            rows = r.json()
+            out = []
+            for t in rows:
+                sym = t["symbol"]
+                if not sym.endswith("IDR"):
+                    continue
+                base = sym[:-3].lower()
+                if len(base) < 2 or _is_stable_symbol(sym):
+                    continue
+                # stablecoin & turunannya: usdt, usdtb, busd, busdb, dst.
+                if base.rstrip("b") in STABLECOINS:
+                    continue
+                qv = float(t.get("quoteVolume", 0))
+                if qv < min_vol_idr:
+                    continue
+                out.append({
+                    "pair": f"{base}_idr",
+                    "symbol": sym,
+                    "last": float(t["lastPrice"]),
+                    "chg24h_pct": float(t.get("priceChangePercent", 0)),
+                    "vol_idr_24h": qv,
+                    "high24h": float(t.get("highPrice", 0)),
+                    "low24h": float(t.get("lowPrice", 0)),
+                })
+            if out:
+                # deduplikasi "B-token" (XRPBIDR = versi bridged dari XRP): jika
+                # pasar utama <ASSET>IDR juga ada di daftar, buang duplikatnya.
+                syms = {u["symbol"] for u in out}
+                out = [u for u in out
+                       if not (u["symbol"].endswith("BIDR")
+                               and len(u["symbol"]) > 5
+                               and u["symbol"] not in ("BONKIDR",)
+                               and u["symbol"][:-4] + "IDR" in syms)]
+                return out
+        except Exception:
+            continue
+    return []
+
+
+def _indodax_universe(min_vol_idr: float) -> list[dict]:
+    """Fallback: keranjang (basket) altcoin populer, cek ticker live Indodax."""
+    basket = [
+        "btc", "eth", "sol", "xrp", "ada", "doge", "dot", "avax", "ltc", "trx",
+        "link", "matic", "shib", "pepe", "uni", "atom", "near", "apt", "arb",
+        "op", "inj", "sei", "tia", "ton", "wif", "bonk", "fetch", "render",
+        "gala", "sui", "kas", "tao", "ena", "ondo", "jup", "pyth", "strk",
+        "xlm", "bch", "algo", "sand", "mana", "aave", "fil", "icp", "ar",
+        "galxe", "ray", "dydx", "loom", "fio", "ocean", "glmr", "knc",
+    ]
+    out = []
+    for a in basket:
+        p = f"{a}_idr"
+        try:
+            r = requests.get(f"https://indodax.com/api/ticker/{p}",
+                             headers=HEADERS, timeout=8)
+            if not r.ok:
+                continue
+            d = r.json()
+            if "error" in d:
+                continue
+            t = d.get("ticker", d)
+            vol = float(t.get("vol_idr") or 0)
+            if vol < min_vol_idr:
+                continue
+            last = float(t["last"])
+            high, low = float(t.get("high", last)), float(t.get("low", last))
+            out.append({
+                "pair": p, "symbol": p.split("_")[0].upper() + "IDR",
+                "last": last,
+                "chg24h_pct": (last / ((high + low) / 2) - 1) * 100,
+                "vol_idr_24h": vol, "high24h": high, "low24h": low,
+            })
+        except Exception:
+            continue
+    return out
+
+
+def get_universe(min_vol_idr: float = 500_000_000) -> tuple[list[dict], str]:
+    """Semua koin berpasangan IDR yang layak dipantau. Return (daftar, sumber)."""
+    uni = _binance_universe(min_vol_idr)
+    if len(uni) >= 5:
+        return uni, "binance-idr"
+    uni2 = _indodax_universe(min_vol_idr)
+    return (uni2, "indodax-basket") if uni2 else ([], "offline")
+
+
+def prescreen(universe: list[dict], top_n: int,
+              max_chg_pct: float = 25.0) -> list[dict]:
+    """Preranking cepat tanpa data historis: momentum sehat + likuiditas.
+
+    - chg24h > 0 (tren naik), tapi tidak > max_chg_pct (hindari pump & dump).
+    - posisi harga dalam range 24 jam menunjukkan kekuatan beli.
+    - skor digabung dengan akar volume (likuiditas penting untuk exit).
+    """
+    scored = []
+    for u in universe:
+        chg = u["chg24h_pct"]
+        if chg <= 0 or chg > max_chg_pct:
+            continue
+        rng = u["high24h"] - u["low24h"]
+        pos_in_range = (u["last"] - u["low24h"]) / rng if rng > 0 else 0.5
+        liq = np.log10(max(u["vol_idr_24h"], 1)) / 11.0      # ~0..1
+        score = 0.45 * min(chg / max_chg_pct, 1.0) + 0.35 * pos_in_range + 0.20 * liq
+        scored.append((score, u))
+    scored.sort(key=lambda x: -x[0])
+    return [u for _, u in scored[:top_n]]
+
+
+class CoinScanner:
+    """Memindai kandidat & menghitung skor peluang tren naik per koin."""
+
+    def __init__(self, strategies, brain, interval_min: int = 60,
+                 limit: int = 300, cache_sec: int = 240):
+        self.strategies = strategies
+        self.brain = brain
+        self.interval_min = interval_min
+        self.limit = limit
+        self.cache_sec = cache_sec
+        self._cache: dict[str, tuple[float, dict]] = {}   # pair -> (ts, hasil)
+
+    def analyze(self, coin: dict) -> dict | None:
+        pair = coin["pair"]
+        hit = self._cache.get(pair)
+        if hit and time.time() - hit[0] < self.cache_sec:
+            return hit[1]
+        df, is_live = fetch_ohlcv_or_synthetic(
+            pair, period=str(self.interval_min), limit=self.limit)
+        if df is None or len(df) < 60:
+            return None
+        feats = normalize_signal_features(build_features(df))
+        i = len(feats) - 1
+        sig = combined_signal(self.strategies, feats, i)
+
+        close = feats["close"]
+        n = len(close)
+        # momentum multi-horizon pada candle asli
+        def mom(bars):
+            j = max(0, n - bars)
+            return float(close.iloc[-1] / max(1e-9, close.iloc[j]) - 1)
+        m5, m20 = mom(5), mom(20)
+        ema_fast_ok = float(feats["ema_trend"][i]) > 0       # tren EMA positif
+        # volume mendukung (OBV slope & rasio volume terhadap SMA)
+        vol_sup = float(np.clip(float(feats["obv_slope"][i]) * 0.5
+                                + float(feats["vol_sma_ratio"][i]) * 0.25, -1, 1))
+        uptrend = 1.0 if (m20 > 0 and ema_fast_ok) else 0.0
+
+        # skor konfluensi teknikal [-1..1] -> [0..1]
+        tech = (sig + 1) / 2
+        trend_score = float(np.clip(
+            0.35 * tech + 0.25 * np.tanh(m5 * 20) + 0.20 * uptrend
+            + 0.10 * np.tanh(m20 * 10) + 0.10 * max(0.0, vol_sup), 0, 1))
+
+        result = {
+            "pair": pair, "symbol": coin["symbol"], "score": trend_score,
+            "signal": sig, "mom5": m5, "mom20": m20, "uptrend": bool(uptrend),
+            "vol_support": vol_sup, "last_close": float(close.iloc[-1]),
+            "live": is_live, "chg24h_pct": coin["chg24h_pct"],
+            "vol_idr_24h": coin["vol_idr_24h"],
+            "features": {k: float(v) for k, v in feats.iloc[i].items()},
+        }
+        self._cache[pair] = (time.time(), result)
+        return result
+
+    def scan(self, universe: list[dict], deep_n: int = 8) -> list[dict]:
+        """Sweep -> prescreen -> analisis mendalam -> ranking final."""
+        cands = prescreen(universe, top_n=deep_n)
+        results = []
+        for c in cands:
+            r = self.analyze(c)
+            if r:
+                results.append(r)
+            time.sleep(0.15)  # hemat rate-limit
+        results.sort(key=lambda x: -x["score"])
+        return results
+
+
+def opportunities(results: list[dict], min_score: float) -> list[dict]:
+    """Filter hasil scan menjadi daftar 'peluang tren naik'."""
+    return [r for r in results if r["score"] >= min_score and r["uptrend"]]

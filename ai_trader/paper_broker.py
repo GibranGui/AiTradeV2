@@ -26,13 +26,28 @@ class Position:
     entry_features: dict  # snapshot fitur saat masuk — dipakai untuk belajar
 
 
+MAX_POSITIONS = 5   # multi-coin: maksimal koin yang dipegang bersamaan
+
+
 class PaperBroker:
+    """Dompet paper trading MULTI-KOIN.
+
+    Dulu hanya memegang satu posisi; kini bisa memegang beberapa altcoin
+    sekaligus (dibatasi MAX_POSITIONS), masing-masing dengan slot kas sendiri.
+    Format lama (satu posisi) otomatis dimigrasikan saat wallet dibaca.
+    """
+
     def __init__(self, start_idr: float = 10_000_000, wallet_path: str = WALLET_PATH):
         self.wallet_path = wallet_path
         self.cash_idr = start_idr
-        self.position: Position | None = None
+        self.positions: dict[str, Position] = {}   # pair -> Position
         self.trades: list[dict] = []
         self._load()
+
+    # properti tunggal untuk kompatibilitas kode lama: posisi pertama (atau None)
+    @property
+    def position(self) -> Position | None:
+        return next(iter(self.positions.values()), None)
 
     # ---------- persistensi ----------
     def _load(self):
@@ -41,9 +56,12 @@ class PaperBroker:
                 with open(self.wallet_path) as f:
                     w = json.load(f)
                 self.cash_idr = w["cash_idr"]
-                p = w.get("position")
-                self.position = Position(**p) if p else None
                 self.trades = w.get("trades", [])
+                pos_list = w.get("positions")
+                if pos_list is None:                       # format lama: satu objek
+                    p = w.get("position")
+                    pos_list = [p] if p else []
+                self.positions = {p["pair"]: Position(**p) for p in pos_list}
             except Exception:
                 pass
 
@@ -51,7 +69,8 @@ class PaperBroker:
         os.makedirs(os.path.dirname(self.wallet_path), exist_ok=True)
         w = {
             "cash_idr": self.cash_idr,
-            "position": asdict(self.position) if self.position else None,
+            "positions": [asdict(p) for p in self.positions.values()],
+            "position": None,                              # field warisan (deprecated)
             "trades": self.trades[-500:],
         }
         with open(self.wallet_path, "w") as f:
@@ -64,8 +83,10 @@ class PaperBroker:
 
     # ---------- eksekusi ----------
     def buy(self, pair: str, price: float, features: dict, alloc: float = 1.0) -> dict | None:
-        """alloc: fraksi dari kas yang dipakai (0..1)."""
-        if self.position is not None or price <= 0:
+        """Beli koin tertentu. alloc: fraksi dari KAS TERSISA yang dipakai (0..1)."""
+        if pair in self.positions or price <= 0:
+            return None
+        if len(self.positions) >= MAX_POSITIONS:
             return None
         spend = self.cash_idr * alloc
         if spend < 50_000:  # min trade ~50rb IDR
@@ -73,24 +94,23 @@ class PaperBroker:
         fee = spend * FEE
         qty = (spend - fee) / price
         self.cash_idr -= spend
-        self.position = Position(pair, qty, price, time.time(), dict(features))
+        self.positions[pair] = Position(pair, qty, price, time.time(), dict(features))
         rec = {"action": "BUY", "pair": pair, "price": price, "qty": qty,
-               "fee_idr": fee, "time": self.position.entry_time, "pnl": None}
+               "fee_idr": fee, "time": self.positions[pair].entry_time, "pnl": None}
         self.trades.append(rec)
         self.save()
         return rec
 
     def sell(self, pair: str, price: float, reason: str = "signal") -> dict | None:
-        if self.position is None or self.position.pair != pair or price <= 0:
+        if pair not in self.positions or price <= 0:
             return None
-        pos = self.position
+        pos = self.positions.pop(pair)
         gross = pos.qty * price
         fee = gross * FEE
         proceeds = gross - fee
         pnl_idr = proceeds - pos.qty * pos.entry_price
         pnl_pct = price / pos.entry_price - 1 - 2 * FEE
         self.cash_idr += proceeds
-        self.position = None
         rec = {"action": "SELL", "pair": pair, "price": price, "qty": pos.qty,
                "fee_idr": fee, "time": time.time(), "pnl": pnl_idr, "pnl_pct": pnl_pct,
                "reason": reason, "entry_features": pos.entry_features,
@@ -99,7 +119,14 @@ class PaperBroker:
         self.save()
         return rec
 
-    def equity(self, price: float) -> float:
-        if self.position:
-            return self.cash_idr + self.position.qty * price * (1 - FEE)
-        return self.cash_idr
+    def equity(self, prices: dict[str, float] | float) -> float:
+        """Ekuitas total. `prices`: dict pair->harga, atau satu harga (mode lama)."""
+        eq = self.cash_idr
+        if isinstance(prices, dict):
+            for pair, pos in self.positions.items():
+                px = prices.get(pair, pos.entry_price)
+                eq += pos.qty * px * (1 - FEE)
+        else:
+            for pos in self.positions.values():
+                eq += pos.qty * prices * (1 - FEE)
+        return eq
