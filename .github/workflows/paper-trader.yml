@@ -32,6 +32,19 @@ on:
     # siklus baru selalu menggantikan siklus lama yang masih menggantung —
     # state tetap konsisten karena tiap run restore dari branch bot-state.
 
+  schedule:
+    # CATATAN PENTING (terkonfirmasi empiris di repo ini): GitHub sering TIDAK
+    # menjalankan / menunda `schedule:` — sejak repo dibuat, run event=schedule
+    # = 0. JANGAN bergantung pada cron ini. Mekanisme otomatis yang ANDAL adalah
+    # Watchdog (watchdog.yml) + tick eksternal via repository_dispatch:
+    #   - gratis & tanpa akun: https://www.cronjob.dev (POST tiap 30 mnt ke
+    #     .../dispatches dengan event_type "watchdog-tick")
+    #   - atau curl-cron-job.com / GitHub Action di repo lain / server sendiri:
+    #     curl -X POST -H "Authorization: Bearer <PAT>" \
+    #       -d '{"event_type":"watchdog-tick"}' \
+    #       https://api.github.com/repos/GibranGui/AiTradeV2/dispatches
+    - cron: "*/15 * * * *"
+
 permissions:
   contents: write            # izin push ke branch bot-state
 
