@@ -24,7 +24,7 @@ on:
         required: false
         default: "30"
   schedule:
-    - cron: "*/30 * * * *"   # tiap 30 menit: sinkron state + simpan snapshot
+    - cron: "0,30 * * * *"   # tiap jam :00 dan :30 (cron Actions tidak jalan di private repo; repo ini publik jadi aman)
 
 permissions:
   contents: write            # izin push ke branch bot-state
