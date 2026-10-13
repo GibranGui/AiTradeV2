@@ -64,10 +64,11 @@ def print_banner(pair, is_live):
 
 def run_loop(pair: str, interval_min: int, poll_sec: int, evolve_every: int,
              scan_mode: bool = False, deep_n: int = 8, min_score: float = 0.62,
-             min_vol_idr: float = 500_000_000):
+             min_vol_idr: float = 500_000_000, max_minutes: float = 0.0):
     if scan_mode:
         return run_scan_loop(interval_min, poll_sec, evolve_every,
-                             deep_n, min_score, min_vol_idr)
+                             deep_n, min_score, min_vol_idr, max_minutes)
+    _deadline = time.time() + (max_minutes * 60 if max_minutes > 0 else 1e12)
     broker = PaperBroker()
     brain = load_brain()
     strategies = load_portfolio()
@@ -82,7 +83,7 @@ def run_loop(pair: str, interval_min: int, poll_sec: int, evolve_every: int,
     last_evolve = time.time()
     cycle = 0
     try:
-        while True:
+        while time.time() < _deadline:
             cycle += 1
             # refresh data pasar secara berkala
             if cycle % 10 == 1 or not is_live:
@@ -168,9 +169,11 @@ def do_evolve(pair: str, interval_min: int):
 
 
 def run_scan_loop(interval_min: int, poll_sec: int, evolve_every: int,
-                  deep_n: int, min_score: float, min_vol_idr: float):
+                  deep_n: int, min_score: float, min_vol_idr: float,
+                  max_minutes: float = 0.0):
     """MODE MULTI-KOIN: pindai seluruh pasar IDR tiap siklus, tradingi koin
     yang menunjukkan peluang tren naik. Tidak terpaku pada satu koin."""
+    _deadline = time.time() + (max_minutes * 60 if max_minutes > 0 else 1e12)
     broker = PaperBroker()
     brain = load_brain()
     strategies = load_portfolio()
@@ -188,7 +191,7 @@ def run_scan_loop(interval_min: int, poll_sec: int, evolve_every: int,
     last_evolve = time.time()
     cycle = 0
     try:
-        while True:
+        while time.time() < _deadline:
             cycle += 1
             ts = time.strftime("%H:%M:%S")
             universe, src = get_universe(min_vol_idr=min_vol_idr)
@@ -353,15 +356,18 @@ def main():
     ap.add_argument("--min-score", type=float, default=0.62, help="ambang skor peluang tren naik")
     ap.add_argument("--min-vol", type=float, default=500_000_000,
                     help="volume 24 jam minimum (IDR) agar koin dilirik")
+    ap.add_argument("--max-minutes", type=float, default=0.0,
+                    help="hentikan loop otomatis setelah N menit (0 = tak terbatas)")
     a = ap.parse_args()
 
     if a.cmd == "run":
         run_loop(a.pair, a.interval, a.poll, a.evolve_every,
                  scan_mode=(a.pair.lower() in ("", "all", "scan")),
-                 deep_n=a.deep, min_score=a.min_score, min_vol_idr=a.min_vol)
+                 deep_n=a.deep, min_score=a.min_score, min_vol_idr=a.min_vol,
+                 max_minutes=a.max_minutes)
     elif a.cmd == "scan":
         run_scan_loop(a.interval, a.poll, a.evolve_every,
-                      a.deep, a.min_score, a.min_vol)
+                      a.deep, a.min_score, a.min_vol, a.max_minutes)
     elif a.cmd == "list":
         do_list(a.deep, a.min_score, a.min_vol, a.interval)
     elif a.cmd == "evolve":

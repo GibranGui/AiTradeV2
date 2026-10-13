@@ -8,7 +8,7 @@ on:
   workflow_dispatch:        # tombol "Run workflow" manual di tab Actions
     inputs:
       pair:
-        description: "Pair (pakai 'all' untuk mode multi-koin) atau modus: scan"
+        description: "Pair (pakai 'scan' untuk mode multi-koin altcoin)"
         required: false
         default: scan
       interval:
@@ -75,14 +75,19 @@ jobs:
         run: |
           # PAIR = "scan"/"all" -> mode multi-koin (altcoin scanner);
           # selain itu -> mode satu koin klasik.
+          # CATATAN: tidak memakai util `timeout` shell (bisa menggantung bila
+          # proses anak menahan pipe). Bot dibatasi lewat argumen --max-minutes
+          # sehingga berhenti sendiri secara rapi sebelum job timeout.
           if [ "$PAIR" = "scan" ] || [ "$PAIR" = "all" ]; then
-            timeout 25m python -m ai_trader.main scan \
+            python -m ai_trader.main scan \
               --interval "$INTERVAL" --poll "$POLL" \
-              --evolve-every "$EVOLVE_EVERY" --min-vol 50000000 || true
+              --evolve-every "$EVOLVE_EVERY" --min-vol 50000000 \
+              --max-minutes 20 || true
           else
-            timeout 25m python -m ai_trader.main run \
+            python -m ai_trader.main run \
               --pair "$PAIR" --interval "$INTERVAL" \
-              --poll "$POLL" --evolve-every "$EVOLVE_EVERY" || true
+              --poll "$POLL" --evolve-every "$EVOLVE_EVERY" \
+              --max-minutes 20 || true
           fi
           python -m ai_trader.main status >> bot-report.txt
 
