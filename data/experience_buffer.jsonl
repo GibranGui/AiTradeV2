@@ -5,3 +5,5 @@
 {"t": 1791715796.042697, "type": "evolve", "result": {"return_pct": 0.0, "win_rate": 0.0, "trades": 0, "max_dd_pct": 0.0, "sharpe": 0.0, "fitness": 0.0}, "generations": 6}
 {"t": 1791715818.457195, "type": "evolve", "result": {"return_pct": -48.48798303792714, "win_rate": 1.0, "trades": 1, "max_dd_pct": 49.4133839028869, "sharpe": -3.708202388063604, "fitness": -60.61107976549779}, "generations": 6}
 {"t": 1791715846.3234386, "type": "evolve", "result": {"return_pct": -87.03835143341875, "win_rate": 0.6666666666666666, "trades": 3, "max_dd_pct": 87.33537884655647, "sharpe": -6.565049762688847, "fitness": -130.50280704874135}, "generations": 6}
+{"t": 1791893249.3494687, "type": "evolve", "result": {"return_pct": 0.35953666234225246, "win_rate": 0.5, "trades": 8, "max_dd_pct": 3.4972978440273805, "sharpe": 0.4866291230255488, "fitness": 9.58414598637966}, "generations": 2}
+{"t": 1791893258.7837183, "type": "evolve", "result": {"return_pct": 3.534413632510547, "win_rate": 1.0, "trades": 3, "max_dd_pct": 1.5290102133366346, "sharpe": 6.594111224414028, "fitness": 35.95813097467028}, "generations": 6}

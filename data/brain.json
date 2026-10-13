@@ -1,0 +1,9 @@
+{
+  "entry_threshold": 0.25,
+  "stop_loss_pct": 0.02,
+  "take_profit_pct": 0.035,
+  "alloc_frac": 0.5,
+  "lr": 0.1,
+  "total_wins": 0,
+  "total_losses": 0
+}

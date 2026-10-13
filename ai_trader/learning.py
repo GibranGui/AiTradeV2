@@ -177,11 +177,14 @@ def run_backtest(strategies: list[Strategy], df, features, brain: dict,
     (strategies, df, features, brain).
     """
     n = len(df)
+    # Akuntansi equity-based: eq = kas + nilai pasar posisi. Pembelian memakai
+    # fraksi tetap dari EKUITAS (bukan seluruh sisa kas) sehingga tidak ada
+    # "uang hantu" yang membuat return backtest membengkak secara artifisial.
     cash, pos_qty, entry_px = 1.0, 0.0, 0.0
     eq_curve, trades = [], []
     thr, sl, tp = brain["entry_threshold"], brain["stop_loss_pct"], brain["take_profit_pct"]
+    alloc = float(brain.get("alloc_frac", 0.5))
     close = df["close"].values
-    # ATR dinamis: stop-loss & take-profit mengikuti volatilitas pasar
     atr_series = features["atr_raw"] if "atr_raw" in features else None
     med_atr = float(np.median(atr_series[atr_series > 0])) if atr_series is not None else None
 
@@ -202,15 +205,18 @@ def run_backtest(strategies: list[Strategy], df, features, brain: dict,
             elif sig < -thr * 0.5:
                 exit_reason = "signal_exit"
             if exit_reason:
-                cash = pos_qty * px * (1 - fee)
+                cash += pos_qty * px * (1 - fee)
                 trades.append({"pnl_pct": chg - 2 * fee, "reason": exit_reason})
                 pos_qty = 0.0
         else:
             sig = combined_signal(strategies, features, i)
             if sig > thr:
-                pos_qty = cash * brain["alloc_frac"] * (1 - fee) / px
-                cash *= (1 - brain["alloc_frac"])
-                entry_px = px
+                eq = cash + pos_qty * px
+                spend = min(cash, max(0.0, eq * alloc))
+                if spend > 1e-9:
+                    pos_qty = spend * (1 - fee) / px
+                    cash -= spend
+                    entry_px = px
         eq = cash + (pos_qty * px if pos_qty else 0.0)
         eq_curve.append(eq)
 
