@@ -117,25 +117,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           git config user.name  "ai-trade-bot"
           git config user.email "bot@users.noreply.github.com"
           git checkout --orphan bot-state
+          # PENTING: branch bot-state TIDAK boleh berisi file workflow apa pun.
+          # GITHUB_TOKEN default tidak punya scope `workflows`, jadi push ref yang
+          # menyertakan .github/workflows/* akan DITOLAK GitHub ("refusing to allow
+          # a GitHub App to create or update workflow ... without workflows
+          # permission") dan seluruh snapshot state gagal. Hapus dulu dari index.
+          git rm -r --cached .github --quiet 2>/dev/null || true
           git add -f data/ bot-report.txt site/
           git commit -m "state snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           STATE_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-          git push --force "$STATE_URL" bot-state:bot-state
-          # RANTAI LOOP OTOMATIS: push bot-state juga menyentuh paper-trader.yml,
-          # sehingga Watchdog (yang listen perubahan file itu di main) ikut jalan
-          # dan men-dispatch siklus berikutnya bila state >25 menit. Tanpa langkah
-          # ini, satu siklus selesai = tidak ada pemicu lagi (cron GitHub tidak
-          # pernah fire di repo ini — terbukti 0 run event=schedule).
-          sleep 5
-          touch .github/workflows/paper-trader.yml
-          git add -f .github/workflows/paper-trader.yml
-          git commit -q -m "tick: bangunkan Watchdog" || true
-          git push --force "$STATE_URL" HEAD:refs/heads/bot-state || true
+          git push --force "$STATE_URL" HEAD:refs/heads/bot-state
+          # RANTAI LOOP OTOMATIS: tiap akhir siklus kirim repository_dispatch
+          # -> Watchdog mengecek umur run Paper Trader terakhir; bila >=25 menit,
+          # ia men-dispatch siklus berikutnya. (Cron/schedule GitHub terbukti 0x
+          # fire di repo ini, jadi rantai dispatch inilah penggeraknya.)
           gh api -X POST "repos/${{ github.repository }}/dispatches" \
-            -f event_type=watchdog-tick || true
+            -f event_type=watchdog-tick
 
       - name: Publikasikan dashboard ke GitHub Pages (branch gh-pages)
         if: always()
