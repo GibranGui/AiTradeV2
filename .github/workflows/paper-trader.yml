@@ -1,0 +1,89 @@
+name: Paper Trader (live loop)
+
+# Jalankan bot paper-trading AI dengan harga asli Indodax.
+# State (dompet, otak, strategi) disimpan di branch terpisah `bot-state`
+# supaya tidak mengotori kode utama.
+
+on:
+  workflow_dispatch:        # tombol "Run workflow" manual di tab Actions
+    inputs:
+      pair:
+        description: Pair Indodax
+        required: false
+        default: IDRBTC
+      interval:
+        description: Periode candle (menit)
+        required: false
+        default: "60"
+      poll:
+        description: Detik antar-siklus
+        required: false
+        default: "30"
+      evolve_every:
+        description: Menit antar-evolusi strategi
+        required: false
+        default: "30"
+  schedule:
+    - cron: "*/30 * * * *"   # tiap 30 menit: sinkron state + simpan snapshot
+
+permissions:
+  contents: write            # izin push ke branch bot-state
+
+concurrency:
+  group: paper-trader
+  cancel-in-progress: true
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    steps:
+      - name: Checkout kode (branch main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Restore state dari branch bot-state (jika ada)
+        run: |
+          if git ls-remote --exit-code --heads origin bot-state >/dev/null 2>&1; then
+            git fetch origin bot-state
+            git checkout origin/bot-state -- data/ || true
+            echo "State dipulihkan dari branch bot-state."
+          else
+            echo "Belum ada state — mulai fresh (data/ bawaan repo)."
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependensi
+        run: pip install -r requirements.txt
+
+      - name: Snapshot status awal
+        run: python -m ai_trader.main status | tee bot-report.txt
+
+      - name: Jalankan loop paper trader (maks ~25 menit per siklus)
+        env:
+          PAIR: ${{ github.event.inputs.pair || 'IDRBTC' }}
+          INTERVAL: ${{ github.event.inputs.interval || '60' }}
+          POLL: ${{ github.event.inputs.poll || '30' }}
+          EVOLVE_EVERY: ${{ github.event.inputs.evolve_every || '30' }}
+        run: |
+          timeout 25m python -m ai_trader.main run \
+            --pair "$PAIR" --interval "$INTERVAL" \
+            --poll "$POLL" --evolve-every "$EVOLVE_EVERY" || true
+          python -m ai_trader.main status >> bot-report.txt
+
+      - name: Simpan state ke branch bot-state
+        if: always()
+        run: |
+          git config user.name  "ai-trade-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout --orphan bot-state
+          git add -f data/ bot-report.txt
+          git commit -m "state snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push --force https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git bot-state:bot-state

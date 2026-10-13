@@ -1,0 +1,21 @@
+name: CI (smoke test)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Evolusi singkat (data historis Indodax / fallback sintetis)
+        run: python -m ai_trader.main evolve --pair IDRBTC --interval 60
+      - name: Status
+        run: python -m ai_trader.main status

@@ -16,6 +16,21 @@ ai_trader/
 ├── learning.py            # Otak AI: credit assignment, adaptive risk, evolusi backtest
 └── main.py                # Loop real-time + CLI
 data/                      # State yang dipelajari (wallet, brain.json, strategies.json, experience_buffer.jsonl)
+requirements.txt           # Dependensi (requests, pandas, numpy)
+.github/workflows/
+├── paper-trader.yml       # GitHub Actions: jalankan loop bot otomatis tiap 30 menit
+└── ci.yml                 # Smoke-test setiap push/PR
+```
+
+## Quick Start (30 detik)
+
+```bash
+git clone https://github.com/GibranGui/AiTradeV2.git
+cd AiTradeV2
+pip install -r requirements.txt
+python -m ai_trader.main evolve --pair IDRBTC --interval 60   # AI belajar dari data historis
+python -m ai_trader.main run --pair IDRBTC --poll 30           # paper trading live
+python -m ai_trader.main status                                # lihat dompet & pelajaran
 ```
 
 ## Cara AI Belajar dari Kesalahan
@@ -51,6 +66,21 @@ python -m ai_trader.main status
 
 Bot berjalan terus (Ctrl+C untuk berhenti; state tersimpan otomatis).
 Jika tidak ada internet, sistem fallback ke data sintetis agar tetap bisa diuji.
+
+## Jalankan 24/7 dengan GitHub Actions (gratis, tanpa server)
+
+Repo ini punya workflow [`.github/workflows/paper-trader.yml`](.github/workflows/paper-trader.yml)
+yang menjalankan bot di runner GitHub — **tidak perlu VPS**.
+
+- **Otomatis**: cron tiap 30 menit → restore state → jalankan loop ±25 menit → simpan state.
+- **Manual**: tab *Actions* → *Paper Trader (live loop)* → *Run workflow* → isi `pair`, `interval`, `poll`, `evolve_every`.
+- **State persisten** (dompet, otak, strategi, pengalaman) disimpan di branch terpisah
+  **`bot-state`**, plus laporan singkat di `bot-report.txt`. Kode di `main` tidak pernah tercemar.
+- CI tambahan (`.github/workflows/ci.yml`) melakukan smoke-test (`evolve` + `status`) setiap push/PR.
+
+> ⚠️ Aktifkan **Settings → Actions → General → Workflow permissions → Read and write
+> permissions** agar workflow bisa push ke branch `bot-state` (memakai `GITHUB_TOKEN`,
+> bukan token pribadimu).
 
 ## Catatan Penting
 
