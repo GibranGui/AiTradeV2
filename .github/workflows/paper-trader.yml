@@ -91,12 +91,40 @@ jobs:
           fi
           python -m ai_trader.main status >> bot-report.txt
 
+      - name: Render dashboard performa (HTML statis)
+        if: always()
+        run: |
+          # Dashboard dibaca dari state hasil run di atas -> site/index.html
+          python -m ai_trader.dashboard --out site/index.html
+          cat >> $GITHUB_STEP_SUMMARY <<SUM || true
+          ### 📊 Dashboard
+          Di-render otomatis tiap siklus → lihat branch \`gh-pages\` (GitHub Pages).
+          SUM
+
       - name: Simpan state ke branch bot-state
         if: always()
         run: |
           git config user.name  "ai-trade-bot"
           git config user.email "bot@users.noreply.github.com"
           git checkout --orphan bot-state
-          git add -f data/ bot-report.txt
+          git add -f data/ bot-report.txt site/
           git commit -m "state snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push --force https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git bot-state:bot-state
+
+      - name: Publikasikan dashboard ke GitHub Pages (branch gh-pages)
+        if: always()
+        run: |
+          # Branch gh-pages dibuat & di-push ulang tiap siklus; Pages serve dari branch itu.
+          # Catatan: GitHub TIDAK menjalankan cron/schedule pada repo PRIVATE —
+          # kalau nanti repo diprivate, jalankan loop dengan self-hosted runner.
+          BRANCH_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          TMP=$(mktemp -d)
+          cd "$TMP"
+          git init -q -b gh-pages
+          git config user.name  "ai-trade-bot"
+          git config user.email "bot@users.noreply.github.com"
+          cp -r "$GITHUB_WORKSPACE/site/." . 2>/dev/null || true
+          [ -f index.html ] || echo '<h1>Dashboard belum tersedia</h1>' > index.html
+          git add -A
+          git commit -q -m "dashboard $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push --force "$BRANCH_URL" gh-pages:gh-pages

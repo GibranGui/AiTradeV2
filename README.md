@@ -112,3 +112,17 @@ yang menjalankan bot di runner GitHub — **tidak perlu VPS**.
 - Backtest/evolusi memakai data historis terbatas (≤600 candle) → hasil adalah
   latihan adaptasi, bukan jaminan profit. Crypto sangat volatil; gunakan ini untuk
   edukasi.
+
+
+## 📊 Dashboard Performa (otomatis via GitHub Actions)
+
+Bot merender dashboard HTML statis **setiap siklus Actions** dan mempublikasikannya ke GitHub Pages:
+
+- **URL**: `https://<username>.github.io/AiTradeV2/` (aktif setelah Settings → Pages → Source: *Deploy from a branch* → `gh-pages` / `/ (root)`)
+- Isi: kurva ekuitas, win-rate, PnL & return, drawdown maks, Sharpe, performa per koin, riwayat evolusi strategi (perkembangan latihan AI), dan posisi terbuka.
+- Render manual di mesin sendiri: `python -m ai_trader.dashboard --out site/index.html`
+
+### ⚠️ Kalau repo diprivate (rencanamu nanti)
+1. **GitHub Actions cron berhenti berjalan** pada repo private (pembatasan billing free plan). Solusi: pakai **self-hosted runner** (laptop/VPS kamu daftar sebagai runner — tetap bisa private + gratis), atau biarkan repo publik tapi pindahkan state bot ke private repo lain.
+2. **GitHub Pages private** butuh upgrade; alternatif: cukup lihat `site/index.html` di branch `bot-state`/`gh-pages` lewat menu Code, atau render lokal.
+3. Token API Indodax untuk live trading disimpan di **Actions secrets** (repo private tetap aman) — tapi ingat: jangan pernah commit file `.env` / `data/LIVE_CONFIRM.txt`.
