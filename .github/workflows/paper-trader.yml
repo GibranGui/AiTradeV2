@@ -139,8 +139,18 @@ jobs:
           #   EKSTERNAL (source != self-loop) supaya loop internal tidak pernah
           #   berhenti; tick eksternal (cronjob.org/curl-cron tiap :02/:32) tetap
           #   berfungsi sebagai pemantik & penjaga kalau rantai putus.
+          # PENTING: API repository_dispatch HANYA menerima key `event_type` dan
+          # `client_payload`. Key tambahan seperti `source` ditolak GitHub dengan
+          # HTTP 422 ("\"source\" is not a permitted key") — inilah penyebab run
+          # #38467126756 gagal. Sumber tick harus dikirim lewat client_payload.
+          # Dispatch LANGSUNG ke Paper Trader (rantai utama, tanpa perantara).
+          gh api -X POST "repos/${{ github.repository }}/actions/workflows/paper-trader.yml/dispatches" \
+            -f ref=main -f 'inputs[pair]=scan' -f 'inputs[interval]=60' \
+            -f 'inputs[poll]=30' -f 'inputs[evolve_every]=30' || true
+          # Tick Watchdog (penjaga cadangan): source dikirim via client_payload.
           gh api -X POST "repos/${{ github.repository }}/dispatches" \
-            -f event_type=watchdog-tick -f source=self-loop
+            -f event_type=watchdog-tick \
+            -F 'client_payload={"source":"self-loop"}' || true
 
       - name: Publikasikan dashboard ke GitHub Pages (branch gh-pages)
         if: always()
