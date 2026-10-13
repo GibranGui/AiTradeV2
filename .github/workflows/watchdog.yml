@@ -1,0 +1,51 @@
+name: Watchdog (auto-run Paper Trader)
+
+# ── Kenapa ada workflow ini? ────────────────────────────────────────────────
+# GitHub TIDAK menjalankan `schedule:` cron pada repo yang belum punya
+# "last run" — dan run ber-event `schedule` juga di-drop saat antrian runner
+# padat. Akibatnya loop bot tidak pernah jalan otomatis (terkonfirmasi:
+# 0 run event=schedule sejak repo dibuat). Solusi andal: workflow dengan
+# trigger `push` (selalu dieksekusi, tanpa delay scheduler) yang mengecek
+# umur state terakhir di branch bot-state; jika >25 menit -> dispatch Paper
+# Trader. Push tiap :02/:32 = jaminan siklus ~30 menit.
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/watchdog.yml']   # bootstrap: aktifkan sekali via edit file ini
+  repository_dispatch:
+    types: [watchdog-tick]                      # tick eksternal (cron.org dsb) — cadangan
+
+permissions:
+  actions: write      # untuk workflow_dispatch ke paper-trader
+  contents: read
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+jobs:
+  check-and-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Umur state bot vs kebutuhan dispatch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          NOW=$(date -u +%s)
+          # waktu run 'Paper Trader' terakhir (event apa pun)
+          LAST=$(gh api "repos/${{ github.repository }}/actions/workflows/paper-trader.yml/runs?per_page=1" \
+                 --jq '.workflow_runs[0].created_at' 2>/dev/null || true)
+          if [ -z "$LAST" ]; then echo "Belum pernah ada run — dispatch."; LAST_EPOCH=0;
+          else LAST_EPOCH=$(date -u -d "$LAST" +%s); fi
+          AGE_MIN=$(( (NOW - LAST_EPOCH) / 60 ))
+          echo "Run Paper Trader terakhir: ${LAST:-tidak ada} (umur ${AGE_MIN} menit)"
+          if [ "$AGE_MIN" -ge 25 ]; then
+            gh api -X POST "repos/${{ github.repository }}/actions/workflows/paper-trader.yml/dispatches" \
+              -f ref=main -f 'inputs[pair]=scan' -f 'inputs[interval]=60' \
+              -f 'inputs[poll]=30' -f 'inputs[evolve_every]=30'
+            echo "✅ Dispatch terkirim ke Paper Trader (mode scan multi-koin)."
+          else
+            echo "⏳ Masih segar (<25 menit) — tidak dispatch."
+          fi
