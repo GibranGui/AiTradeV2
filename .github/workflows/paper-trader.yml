@@ -24,7 +24,13 @@ on:
         required: false
         default: "30"
   schedule:
-    - cron: "0,30 * * * *"   # tiap jam :00 dan :30 (cron Actions tidak jalan di private repo; repo ini publik jadi aman)
+    - cron: "*/15 * * * *"   # tiap 15 menit (lihat catatan anti-overlap di bawah)
+    # ── PENTING: kenapa interval 15 menit, bukan 30? ──────────────────────────
+    # GitHub MENONDA jadwal cron saat antrian runner padat (perilaku resmi).
+    # Dengan cadence rapat, job yang terlewat cepat diganti run berikutnya.
+    # Bot dibatasi --max-minutes 20 + concurrency cancel-in-progress, sehingga
+    # siklus baru selalu menggantikan siklus lama yang masih menggantung —
+    # state tetap konsisten karena tiap run restore dari branch bot-state.
 
 permissions:
   contents: write            # izin push ke branch bot-state
