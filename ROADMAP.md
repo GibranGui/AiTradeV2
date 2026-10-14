@@ -65,6 +65,41 @@ lengkap. Prioritas proyek: KEBENARAN DIAGNOSIS > KEAMANAN > KUALITAS > FREKUENSI
 
 ---
 
+## ✅ 2026-10-14 — Perbaikan loop Actions: run dibatalkan & double-dispatch (SELESAI)
+
+### Gejala
+Run Paper Trader beruntun berkesimpulan `cancelled` (mis. #38519257448,
+#38523466957, #38523483673, #38523631951) — state snapshot bot-state hilang,
+loop tampak "berjalan" tapi tidak pernah menuntaskan siklus.
+
+### Akar masalah (terbukti dari riwayat API Actions + kode workflow)
+1. `concurrency.cancel-in-progress: true` pada paper-trader.yml → setiap
+   dispatch baru MEMBATALKAN run yang hampir selesai, tepat sebelum langkah
+   "Simpan state ke branch bot-state".
+2. Double-dispatch per siklus: Paper Trader mengirim self-dispatch
+   workflow_dispatch DAN tick watchdog `self-loop` yang memicu dispatch kedua.
+   Dua sumber pemicu = dua run beruntun = saling batalkan (bug #1).
+
+### Perbaikan (commit `2412cba`)
+- `paper-trader.yml`: `cancel-in-progress: false`; rantai loop kini SATU
+  mekanisme saja — self-dispatch via secret `BOT_PAT`. Tick `self-loop`
+  dihapus dari akhir siklus.
+- `watchdog.yml`: tick `self-loop` (sisa antrian lama) diabaikan; Watchdog
+  kembali menjadi murni penjaga — dispatch hanya bila umur run ≥ 25 menit.
+- `main.py run_scan_loop`: cek deadline SEBELUM tidur; loop berhenti rapi
+  ~60 detik sebelum `--max-minutes` sehingga state selalu tersimpan; grace
+  15s setelah siklus error agar satu kegagalan tak langsung mengakhiri run.
+
+### Verifikasi (data aktual GitHub Actions, tanpa trigger manual oleh tim dev)
+- Run #38523643379: `completed success` — langkah "Simpan state" sukses;
+  snapshot bot-state `2026-10-14T07:01:23Z` tercatat.
+- Run #38525702405 (rantai otomatis berikutnya): `completed success`;
+  snapshot bot-state `2026-10-14T07:20:20Z` — rantai self-dispatch terbukti
+  menyambung sendiri TANPA pembatalan, 1 run aktif per waktu.
+- pytest 19/19 lulus pasca-perubahan; scan live end-to-end lokal OK.
+
+---
+
 ## ⏭️ Langkah berikutnya
 - [ ] Pantau `[SUMMARY]`/`[FUNNEL]` di log Actions beberapa siklus; jika
       `entry-siap>0` tapi `exec-gagal>0`, alasan kini eksplisit di `[EXEC]`.
