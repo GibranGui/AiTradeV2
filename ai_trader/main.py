@@ -46,6 +46,8 @@ from ai_trader.strategies.portfolio import (
     Strategy, combined_signal, load_portfolio, save_portfolio,
 )
 from ai_trader.paper_broker import PaperBroker, FEE, MAX_POSITIONS
+from ai_trader.scalper import (Scalper, scalp_exit_decision,
+                               SCALP_INTERVAL_MIN, SCALP_MAX_POSITIONS)
 from ai_trader.scanner import CoinScanner, get_universe, opportunities
 from ai_trader.diag import CycleDiag
 from ai_trader.learning import (
@@ -183,12 +185,16 @@ def run_scan_loop(interval_min: int, poll_sec: int, evolve_every: int,
     brain = load_brain()
     strategies = load_portfolio()
     scanner = CoinScanner(strategies, brain, interval_min=interval_min)
+    scalper = Scalper(strategies)
+    scalper = Scalper(strategies)   # jalur kedua: scalping candle 15m
 
     print(f"\n{'=' * 62}\n"
           f"  AI TRADER MULTI-COIN — paper trading | scan pasar IDR\n"
           f"{'=' * 62}")
     print(f"Kas awal : Rp {broker.cash_idr:,.0f} | posisi maks: {MAX_POSITIONS}")
     print(f"Strategi : {len(strategies)} | ambang skor entry: {min_score:.2f}")
+    print(f"Jalur    : TREN candle {interval_min}m + SCALP candle "
+          f"{SCALP_INTERVAL_MIN}m (maks {SCALP_MAX_POSITIONS} slot scalp)")
     print(f"Brain    : thr={brain['entry_threshold']:.2f} "
           f"SL={brain['stop_loss_pct']:.2%} TP={brain['take_profit_pct']:.2%} "
           f"alloc={brain['alloc_frac']:.0%}\n")
@@ -203,7 +209,7 @@ def run_scan_loop(interval_min: int, poll_sec: int, evolve_every: int,
             try:
                 _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
                             interval_min, deep_n, min_score, min_vol_idr,
-                            evolve_every)
+                            evolve_every, scalper=scalper)
                 strategies = scanner.strategies   # mungkin berubah pasca-evolusi
             except KeyboardInterrupt:
                 raise
@@ -238,7 +244,8 @@ def run_scan_loop(interval_min: int, poll_sec: int, evolve_every: int,
 
 
 def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
-                interval_min, deep_n, min_score, min_vol_idr, evolve_every):
+                interval_min, deep_n, min_score, min_vol_idr, evolve_every,
+                scalper=None):
     """Satu siklus penuh: sweep -> filter -> manajemen posisi -> entry -> evolusi."""
     diag.reset()
     diag._min_score = min_score
@@ -252,8 +259,17 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
         if r["score"] >= min_score and r["uptrend"]:
             diag.score_pass_one()
 
+    # ---- JALUR KEDUA: scalping candle 15 menit (peluang jangka pendek) ----
+    scalp_results, scalp_opps = [], []
+    if scalper is not None:
+        scalp_results = scalper.scan(universe, deep_n=max(deep_n, 10), diag=diag)
+        scalp_opps = scalper.scalp_opportunities(scalp_results, diag=diag)
+        scalper.strategies = strategies      # sinkron pasca-evolusi
+    scalp_pairs = {r["pair"] for r in scalp_results}
+
     # harga live Indodax untuk semua pair yang relevan (posisi + kandidat)
-    pairs = {p["pair"] for p in results} | set(broker.positions)
+    pairs = ({p["pair"] for p in results} | scalp_pairs
+             | set(broker.positions))
     prices: dict[str, float] = {}
     for p in pairs:
         px = broker.current_price(p)
@@ -277,6 +293,35 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
         price = prices.get(pair)
         if price is None:
             continue
+        is_scalp = pos.entry_features.get("_scalp")
+        sig_now = None
+        res = next((x for x in (results if not is_scalp else scalp_results)
+                    if x["pair"] == pair), None)
+        if res:
+            sig_now = res["signal"]
+        else:
+            # posisi tanpa kandidat di papan (mis. pair lama) -> re-fetch ringkas
+            df, _ = fetch_ohlcv_or_synthetic(
+                pair, period=str(SCALP_INTERVAL_MIN if is_scalp else interval_min),
+                limit=300)
+            if df is not None and len(df) >= 60:
+                f2 = normalize_signal_features(build_features(df))
+                sig_now = combined_signal(strategies, f2, len(f2) - 1)
+        if is_scalp:
+            # exit khusus scalp: TP/SL ATR-adaptif, time-stop, trailing ketat
+            reason = scalp_exit_decision(pos, price, sig_now)
+            if reason:
+                trade = broker.sell(pair, price, reason)
+                if trade:
+                    lessons = learn_from_trade(trade, strategies, brain)
+                    save_brain(brain)
+                    save_portfolio(strategies)
+                    print(f"  >> JUAL-SCALP {pair.split('_')[0].upper()} "
+                          f"({reason}) PnL: Rp {trade['pnl']:,.0f} "
+                          f"({trade['pnl_pct']:+.2%})")
+                    for l in lessons:
+                        print(f"     [BELAJAR] {l}")
+            continue
         chg = price / pos.entry_price - 1
         peak = pos.entry_features.get("_peak_chg", 0.0)
         if chg > peak:
@@ -291,14 +336,6 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
                 chg < peak - max(brain["stop_loss_pct"], 0.02):
             reason = "trailing_stop"      # kunci profit saat tren patah
         else:
-            res = next((x for x in results if x["pair"] == pair), None)
-            sig_now = res["signal"] if res else None
-            if sig_now is None:
-                df, _ = fetch_ohlcv_or_synthetic(
-                    pair, period=str(interval_min), limit=300)
-                if df is not None and len(df) >= 60:
-                    f2 = normalize_signal_features(build_features(df))
-                    sig_now = combined_signal(strategies, f2, len(f2) - 1)
             if sig_now is not None and sig_now < -brain["entry_threshold"] * 0.5:
                 reason = "signal_exit"
         if reason:
@@ -350,6 +387,45 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
         else:
             diag.execution(sym, False, broker.last_reject or "unknown")
 
+    # ---- entry SCALP (timeframe 15m): slot terpisah dari tren ----
+    if scalp_opps:
+        n_scalp = sum(1 for p in broker.positions.values()
+                      if p.entry_features.get("_scalp"))
+        print(f"[ENTRY-SCALP] kandidat lolos gerbang scalp 15m: {len(scalp_opps)}"
+              f" | slot scalp aktif: {n_scalp}/{SCALP_MAX_POSITIONS}")
+        for opp in scalp_opps:
+            pair = opp["pair"]
+            sym = pair.split("_")[0].upper()
+            if pair in held:
+                continue
+            if len(broker.positions) >= MAX_POSITIONS:
+                diag.reject(sym, "risk_management", "max_positions_reached",
+                            actual=f"{len(broker.positions)}/{MAX_POSITIONS}")
+                break
+            if n_scalp >= SCALP_MAX_POSITIONS:
+                diag.reject(sym, "risk_management", "scalp_slot_full",
+                            actual=f"{n_scalp}/{SCALP_MAX_POSITIONS}")
+                break
+            price = prices.get(pair) or opp["last_close"]
+            feats_snap = dict(opp["features"])
+            feats_snap["_scalp"] = True
+            feats_snap["_scalp_atr_pct"] = opp["atr_pct"]
+            feats_snap["_scan_score"] = opp["signal"]
+            diag.entry_ready_one()
+            trade = broker.buy(pair, price, feats_snap,
+                               alloc=min(brain["alloc_frac"], 0.25))
+            if trade:
+                held.add(pair)
+                n_scalp += 1
+                diag.execution(sym, True,
+                               f"SCALP@{price:,.0f} sig={opp['signal']:+.2f} "
+                               f"mom5={opp['mom5']:+.2%} atr={opp['atr_pct']:.2%}")
+                print(f"  >> BELI-SCALP {sym} @ {price:,.0f} "
+                      f"(sig={opp['signal']:+.2f} mom5={opp['mom5']:+.2%} "
+                      f"atr={opp['atr_pct']:.2%})")
+            else:
+                diag.execution(sym, False, broker.last_reject or "unknown")
+
     # ---- tampilkan papan peringkat peluang ----
     for r in results[:5]:
         mark = "*" if r["pair"] in broker.positions else " "
@@ -371,6 +447,8 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
         save_portfolio(new_strat)
         save_brain(brain)
         scanner.strategies = new_strat
+        if scalper is not None:
+            scalper.strategies = new_strat   # scalp ikut strategi hasil evolusi
         scanner._last_evolve = time.time()
         print(f"     hasil evolusi: return={res['return_pct']:+.2f}% "
               f"winrate={res['win_rate']:.0%} fitness={res['fitness']:.2f}")
@@ -408,6 +486,21 @@ def do_list(deep_n: int, min_score: float, min_vol_idr: float, interval_min: int
         print(f"{r['symbol']:<12} {r['score']:>6.2f} {r['signal']:>+8.2f} "
               f"{r['chg24h_pct']:>7.1f}% {r['mom20']:>+7.2%} "
               f"{r['vol_idr_24h']:>14,.0f} {flag}")
+    # jalur scalp 15m — peluang jangka pendek
+    scalp_results = scalper.scan(universe, deep_n=max(deep_n, 10), diag=diag)
+    scalp_opps = scalper.scalp_opportunities(scalp_results, diag=diag)
+    if scalp_results:
+        print(f"\n-- SCALP 15m: {len(scalp_results)} kandidat dianalisis, "
+              f"{len(scalp_opps)} lolos gerbang scalp --")
+        for r in sorted(scalp_results, key=lambda x: -x["signal"])[:6]:
+            ok = "✓SIAP" if r in scalp_opps else " "
+            print(f"     {ok:<6}{r['symbol']:<12} sig={r['signal']:+.3f} "
+                  f"mom5={r['mom5']:+.2%} atr={r['atr_pct']:.2%} "
+                  f"volSup={r['vol_support']:+.2f}")
+    if scalp_opps:
+        print(f"=> {len(scalp_opps)} PELUANG SCALP SIAP-ENTRY "
+              f"(sig>={0.10}, mom5>0, EMA>0, volume mendukung, chg24h<=18%)")
+
     print(f"\n=> {len(opps)} PELUANG SIAP-ENTRY (skor >= {min_score:.2f}, "
           f"uptrend, DAN sinyal >= 0.15): "
           + (", ".join(o["symbol"] for o in opps) or "(kosong)"))
