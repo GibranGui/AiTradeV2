@@ -185,7 +185,6 @@ def run_scan_loop(interval_min: int, poll_sec: int, evolve_every: int,
     brain = load_brain()
     strategies = load_portfolio()
     scanner = CoinScanner(strategies, brain, interval_min=interval_min)
-    scalper = Scalper(strategies)
     scalper = Scalper(strategies)   # jalur kedua: scalping candle 15m
 
     print(f"\n{'=' * 62}\n"
@@ -465,6 +464,7 @@ def do_list(deep_n: int, min_score: float, min_vol_idr: float, interval_min: int
     brain = load_brain()
     strategies = load_portfolio()
     scanner = CoinScanner(strategies, brain, interval_min=interval_min)
+    scalper = Scalper(strategies)   # jalur kedua: scalping candle 15m
     universe, src = get_universe(min_vol_idr=min_vol_idr)
     diag = CycleDiag()
     diag.reset()

@@ -21,9 +21,9 @@ class FakeDiag:
     def data_ok(self): pass
 
 
-def _mk_result(sig=0.3, mom5=0.004, ema_ok=True, vol_sup=0.2, chg=5.0):
+def _mk_result(sig=0.3, mom5=0.004, mom12=0.004, ema_ok=True, vol_sup=0.2, chg=5.0):
     return {"pair": "abc_idr", "symbol": "ABCIDR", "signal": sig, "mom5": mom5,
-            "mom20": 0.01, "atr_pct": 0.004, "ema_ok": ema_ok,
+            "mom12": mom12, "mom20": 0.01, "atr_pct": 0.004, "ema_ok": ema_ok,
             "vol_support": vol_sup, "last_close": 10000.0,
             "chg24h_pct": chg, "vol_idr_24h": 1e10, "features": {}}
 
@@ -42,10 +42,13 @@ def test_allpass_when_all_conditions_met():
     assert len(out) == 1 and not d.rejects
 
 
+# Gerbang dua-jalur (lihat scalper.scalp_opportunities):
+#   A) signal >= SCALP_STRONG_SIGNAL (0.20) -> langsung lolos, tanpa mom/EMA
+#   B) signal >= SCALP_SIGNAL_FLOOR (0.10) + mom12 > 0 + ema_ok
 @pytest.mark.parametrize("kw,reason", [
-    ({"sig": 0.05}, "signal_below_floor"),
-    ({"mom5": -0.001}, "no_short_momentum"),
-    ({"ema_ok": False}, "ema_trend_negative"),
+    ({"sig": 0.05, "mom12": 0.004}, "signal_below_floor"),
+    ({"sig": 0.15, "mom12": -0.001, "ema_ok": True}, "signal_below_floor"),
+    ({"sig": 0.15, "mom12": 0.004, "ema_ok": False}, "signal_below_floor"),
     ({"vol_sup": -0.1}, "volume_not_supporting"),
     ({"chg": 25.0}, "pump_extreme"),
 ])
@@ -69,11 +72,15 @@ def test_exit_stop_loss_and_take_profit():
 
 
 def test_exit_time_stop_and_trailing():
-    old = P(entry_time=time.time() - SCALP_MAX_HOLD_SEC - 10)
-    assert scalp_exit_decision(old, 10001, 0.3) == "scalp_time_stop"
+    # time-stop HANYA mengunci profit menua; posisi rugi dibiarkan bekerja
+    # sampai SL/TP (perbaikan: sebelumnya time-stop ikut menutup posisi rugi)
+    old_win = P(entry_time=time.time() - SCALP_MAX_HOLD_SEC - 10)
+    assert scalp_exit_decision(old_win, 10001, 0.3) == "scalp_time_stop"
+    old_loss = P(entry_time=time.time() - SCALP_MAX_HOLD_SEC - 10)
+    assert scalp_exit_decision(old_loss, 9990, 0.3) is None   # rugi + tua -> tunggu SL/TP
     tr = P()
-    scalp_exit_decision(tr, 10000 * 1.008, 0.3)     # naik -> peak tercatat
-    assert scalp_exit_decision(tr, 10000 * 1.001, 0.3) == "scalp_trailing_stop"
+    scalp_exit_decision(tr, 10000 * 1.025, 0.3)     # naik 2.5% -> peak tercatat (>= 0.6*TP)
+    assert scalp_exit_decision(tr, 10000 * 1.018, 0.3) == "scalp_trailing_stop"
 
 
 def test_exit_signal_flip():
