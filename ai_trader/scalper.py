@@ -34,13 +34,14 @@ from .strategies.portfolio import combined_signal, normalize_signal_features
 # --- konfigurasi scalping (terbukti dari backtest lokal, lihat laporan) ---
 SCALP_INTERVAL_MIN = 15          # candle 15 menit
 SCALP_LIMIT = 300                # ~3 hari data 15m
-SCALP_SIGNAL_FLOOR = 0.10        # konfluensi strategi minimal (lebih longgar
-                                 #   dari tren 0.15 karena horizon lebih pendek,
-                                 #   TAPI diganjar filter ekstra di bawah)
+SCALP_SIGNAL_FLOOR = 0.08        # jalur B: konfluensi minimal + mom12>0 + EMA>0
+                                 #   (dilonggarkan dari 0.10 — user minta gate
+                                 #   lebih terbuka; tetap dijaga mom12+EMA+volume)
 SCALP_MAX_CHG24H = 18.0          # hindari koin yang sedang pump ekstrem
 SCALP_MIN_VOL_IDR = 500_000_000  # likuiditas minimal (sama dgn universe)
 SCALP_MAX_POSITIONS = 2          # pagar risiko: maks 2 slot scalp aktif
-SCALP_STRONG_SIGNAL = 0.20       # sinyal kuat — edge gross terbaik di backtest
+SCALP_STRONG_SIGNAL = 0.18       # jalur A: sinyal cukup kuat -> lolos tanpa
+                                 #   syarat momentum (edge terkuat tetap >=0.20)
                                  #   (n=118, win-rate 53%, rata2 +0.60%/4 bar)
 SCALP_MOM_WINDOW = 12             # momentum dihitung per jam (12 bar 15m),
                                  #   BUKAN 5 bar — mom5 terbukti noise: gate

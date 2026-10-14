@@ -137,10 +137,17 @@ def test_reject_not_uptrend():
 
 
 def test_reject_signal_floor():
+    # floor baru = SIGNAL_FLOOR (0.10); sinyal DI BAWAH floor harus ditolak
+    from ai_trader.scanner import SIGNAL_FLOOR
     diag = CycleDiag(); diag.reset()
-    out = opportunities([_res(signal=0.10)], 0.62, diag=diag)
+    weak = _res(signal=SIGNAL_FLOOR - 0.03)     # 0.07 < 0.10
+    out = opportunities([weak], 0.62, diag=diag)
     assert out == []
     assert diag.rejections[0]["reason"] == "signal_below_entry_floor"
+    # dan sinyal TEPAT di floor harus lolos (gerbang longgar terbukti aktif)
+    diag2 = CycleDiag(); diag2.reset()
+    ok = _res(signal=SIGNAL_FLOOR)
+    assert opportunities([ok], 0.62, diag=diag2) == [ok]
 
 
 def test_reject_momentum_conflict():
@@ -323,14 +330,16 @@ def test_full_cycle_entry_execution(isolated, monkeypatch):
 
 # ----------------------------------------------------- konsistensi gerbang ganda
 def test_entry_gate_consistent_with_scanner_gate(isolated, monkeypatch):
-    """Sinyal 0.10 lolos skor tapi HARUS ditolak (floor 0.15) dengan log REJECT."""
+    """Sinyal di bawah SIGNAL_FLOOR lolos skor tapi HARUS ditolak dgn log REJECT.
+    (Floor lama 0.15; kini 0.10 — tes memakai nilai relatif terhadap konstanta.)"""
     from ai_trader import main
     mk, _, _ = isolated
     broker = mk()
     brain = {"entry_threshold": 0.25, "stop_loss_pct": 0.05,
              "take_profit_pct": 0.08, "alloc_frac": 0.2}
     strategies = make_strategies()
-    weak = dict(_res(signal=0.10), pair="weak_idr", last_close=1000.0,
+    from ai_trader.scanner import SIGNAL_FLOOR
+    weak = dict(_res(signal=SIGNAL_FLOOR - 0.03), pair="weak_idr", last_close=1000.0,
                 live=True, chg24h_pct=5.0, vol_idr_24h=9e9, features={})
     monkeypatch.setattr(main, "get_universe", lambda min_vol_idr: ([coin()], "mock"))
     sc = CoinScanner(strategies, brain)

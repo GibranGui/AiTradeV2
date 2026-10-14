@@ -48,7 +48,8 @@ from ai_trader.strategies.portfolio import (
 from ai_trader.paper_broker import PaperBroker, FEE, MAX_POSITIONS
 from ai_trader.scalper import (Scalper, scalp_exit_decision,
                                SCALP_INTERVAL_MIN, SCALP_MAX_POSITIONS)
-from ai_trader.scanner import CoinScanner, get_universe, opportunities
+from ai_trader.scanner import (CoinScanner, get_universe, opportunities,
+                             DEFAULT_MIN_SCORE, SIGNAL_FLOOR)
 from ai_trader.diag import CycleDiag
 from ai_trader.learning import (
     load_brain, save_brain, learn_from_trade, evolve, run_backtest, log_experience,
@@ -66,7 +67,7 @@ def print_banner(pair, is_live):
 
 
 def run_loop(pair: str, interval_min: int, poll_sec: int, evolve_every: int,
-             scan_mode: bool = False, deep_n: int = 8, min_score: float = 0.62,
+             scan_mode: bool = False, deep_n: int = 8, min_score: float = DEFAULT_MIN_SCORE,
              min_vol_idr: float = 500_000_000, max_minutes: float = 0.0):
     if scan_mode:
         return run_scan_loop(interval_min, poll_sec, evolve_every,
@@ -360,7 +361,9 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
             break
         if pair in held:
             continue
-        thr = min(brain["entry_threshold"], 0.15)
+        # otak boleh melonggarkan sendiri sampai SIGNAL_FLOOR; tidak
+        # pernah lebih ketat dari gerbang scanner (hindari dead-gate).
+        thr = min(brain["entry_threshold"], SIGNAL_FLOOR)
         if opp["signal"] < thr:
             # seharusnya tak terjangkau lagi (gerbang konfirmasi di
             # opportunities memakai floor yang sama) — tetap dicatat.
@@ -457,7 +460,7 @@ def do_list(deep_n: int, min_score: float, min_vol_idr: float, interval_min: int
     """Satu kali scan: tampilkan daftar koin dengan peluang tren naik.
 
     Kini memakai gerbang terpadu yang SAMA dengan loop trading
-    (skor >= ambang + uptrend + konfirmasi sinyal strategi >= 0.15) plus
+    (skor >= ambang + uptrend + konfirmasi sinyal strategi >= SIGNAL_FLOOR) plus
     diagnostic logging — sehingga "PELUANG" di sini benar-benar kandidat
     yang bisa dieksekusi, bukan hanya lolos skor aditif.
     """
@@ -502,7 +505,7 @@ def do_list(deep_n: int, min_score: float, min_vol_idr: float, interval_min: int
               f"(sig>={0.10}, mom5>0, EMA>0, volume mendukung, chg24h<=18%)")
 
     print(f"\n=> {len(opps)} PELUANG SIAP-ENTRY (skor >= {min_score:.2f}, "
-          f"uptrend, DAN sinyal >= 0.15): "
+          f"uptrend, DAN sinyal >= {SIGNAL_FLOOR}): "
           + (", ".join(o["symbol"] for o in opps) or "(kosong)"))
     diag.summary(1, len(opps), MAX_POSITIONS, 0.0)
 
@@ -531,7 +534,8 @@ def main():
     ap.add_argument("--poll", type=int, default=30, help="detik antar-siklus")
     ap.add_argument("--evolve-every", type=int, default=30, help="menit antar-evolusi")
     ap.add_argument("--deep", type=int, default=8, help="jumlah kandidat untuk analisis mendalam")
-    ap.add_argument("--min-score", type=float, default=0.62, help="ambang skor peluang tren naik")
+    ap.add_argument("--min-score", type=float, default=DEFAULT_MIN_SCORE,
+                    help=f"ambang skor peluang tren naik (default {DEFAULT_MIN_SCORE})")
     ap.add_argument("--min-vol", type=float, default=500_000_000,
                     help="volume 24 jam minimum (IDR) agar koin dilirik")
     ap.add_argument("--max-minutes", type=float, default=0.0,

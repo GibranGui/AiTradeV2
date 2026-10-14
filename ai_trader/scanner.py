@@ -34,6 +34,17 @@ BINANCE_HOSTS = ("https://data-api.binance.info", BINANCE_VISION,
 HEADERS = {"User-Agent": "Mozilla/5.0 (AI-Trader-Scanner)"}
 TIMEOUT = 15
 
+# ---- satu sumber kebenaran untuk ambang keputusan (user minta threshold   ----
+# ---- dilonggarkan; nilai lama: min_score=0.62, floor sinyal=0.15).        ----
+# Perubahan ini HANYA melonggarkan gerbang frekuensi — logika skor, filter
+# risiko, fee, SL/TP, dan mekanisme belajar tidak disentuh sama sekali.
+DEFAULT_MIN_SCORE = 0.55   # pelonggaran moderat dari 0.62 (bukti funnel CI:
+                           #   kandidat terbaik mentok di 0.45-0.57 saat pasar
+                           #   sideways; 0.55 mulai membuka pintu tanpa banjir)
+SIGNAL_FLOOR = 0.10        # konfirmasi arah minimal; diturunkan dari 0.15
+                           #   SEJALAN pelonggaran skor agar gerbang tetap
+                           #   konsisten scanner <-> main.py
+
 # stablecoin / aset non-spekulatif — jangan pernah diperdagangkan
 STABLECOINS = {
     "usdt", "usdc", "busd", "dai", "fdusd", "tusd", "usdp", "idrxx", "idrtb",
@@ -304,7 +315,8 @@ def opportunities(results: list[dict], min_score: float,
                             actual=f"mom20={r['mom20']:+.2%} ema_trend<=0")
             continue
         if require_confluence:
-            thr = 0.15                          # sama dengan batas bawah entry main.py
+            thr = SIGNAL_FLOOR                  # satu sumber kebenaran; selaras
+                                                # dgn plafon entry di main.py
             sig = r["signal"]
             m5 = r["mom5"]
             if sig < thr:
@@ -315,7 +327,7 @@ def opportunities(results: list[dict], min_score: float,
                 continue
             # konfluensi momentum: sinyal beli kuat tapi 5 bar terakhir turun
             # tajam = pola reversal sedang terjadi — jangan masuk.
-            if sig > 0.15 and m5 < -0.005:
+            if sig > SIGNAL_FLOOR and m5 < -0.005:
                 if diag:
                     diag.reject(sym, "momentum_conflict",
                                 "bullish_signal_vs_negative_m5",

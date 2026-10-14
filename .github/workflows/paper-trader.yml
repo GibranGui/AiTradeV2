@@ -97,6 +97,7 @@ jobs:
             python -m ai_trader.main scan \
               --interval "$INTERVAL" --poll "$POLL" \
               --evolve-every "$EVOLVE_EVERY" --min-vol 50000000 \
+              --min-score "${{ vars.MIN_SCORE }}" \
               --max-minutes 20 || true
           else
             python -m ai_trader.main run \
