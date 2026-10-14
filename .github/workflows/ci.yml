@@ -17,7 +17,13 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Unit & integration tests (pipeline audit AiTradeV2)
         run: |
-          pip install pytest
+          # CATATAN (penyebab error CI run #38519257448): `pip install pytest`
+          # tanpa batas versi memasang pytest 9.x, yang MENOLAK plugin pihak
+          # ketiga dengan mark di fixture — libtmux (terbawa di image runner)
+          # crash saat load: "Failed: Marks cannot be applied to fixtures."
+          # Flag `-p no:libtmux` tidak menolong karena crash terjadi SEBELUM
+          # flag diproses. Solusi permanen: pin pytest <9 (runtuh pada 8.4.x).
+          pip install "pytest>=8,<9"
           python -m pytest tests/ -q -p no:libtmux \
             --junitxml=data/reports/junit.xml
       - name: Upload test report
