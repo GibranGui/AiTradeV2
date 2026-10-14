@@ -151,10 +151,24 @@ def test_reject_signal_floor():
 
 
 def test_reject_momentum_conflict():
+    # gerbang baru: tolak HANYA koreksi dalam (mom5<-1.5%) DAN tren lemah
+    # (mom20<=0); sinyal kuat >= 2x floor mendapat bypass.
     diag = CycleDiag(); diag.reset()
-    out = opportunities([_res(signal=0.5, mom5=-0.02)], 0.62, diag=diag)
+    out = opportunities([_res(signal=0.12, mom5=-0.02, mom20=-0.01)], 0.62,
+                        signal_floor=0.10, diag=diag)
     assert out == []
     assert diag.rejections[0]["stage"] == "momentum_conflict"
+
+def test_shallow_pullback_in_uptrend_passes():
+    # koreksi dangkal di tengah uptrend = peluang, bukan penolakan
+    diag = CycleDiag(); diag.reset()
+    ok = _res(score=0.70, signal=0.12, mom5=-0.008, mom20=0.03, uptrend=True)
+    assert opportunities([ok], 0.62, signal_floor=0.10, diag=diag) == [ok]
+
+def test_strong_signal_bypasses_momentum_gate():
+    diag = CycleDiag(); diag.reset()
+    strong = _res(score=0.70, signal=0.5, mom5=-0.02, mom20=-0.01, uptrend=True)
+    assert opportunities([strong], 0.62, signal_floor=0.10, diag=diag) == [strong]
 
 
 def test_candidate_passes_all_gates():
@@ -352,3 +366,30 @@ def test_entry_gate_consistent_with_scanner_gate(isolated, monkeypatch):
     assert diag.buys_ok == 0
     # ditolak DI SCANNER GATE (bukan senyap) — peluang kosong sejak awal
     assert any(r["stage"] == "strategy_confirmation" for r in diag.rejections)
+
+
+# ------------------------- FIX "reject >> open": safety-net kesunyian ------
+def test_silence_decay_active_with_stale_open_position():
+    """BUG LAMA: satu posisi menggantung membekukan jangkar selamanya ->
+    gerbang tidak pernah melonggar -> bot abadi reject tanpa belajar.
+    Sekarang: jika entry terakhir sudah lama (>4 jam), AI tetap berlatih
+    memberanikan diri meski masih ada posisi terbuka."""
+    from ai_trader.gates import apply_silence_decay, default_gates
+    class P:  entry_time = _FUTURE - 10 * 3600          # posisi berumur 10 jam
+    class B:  positions = {"x_idr": P()}; trades = []
+    brain = dict(default_gates()); brain["_silence_anchor"] = _FUTURE - 10 * 3600
+    lessons = apply_silence_decay(brain, [], B(), now=_FUTURE)
+    assert lessons, "safety-net harus aktif saat tidak ada ENTRY baru >4 jam"
+    assert brain["entry_threshold"] < default_gates()["entry_threshold"]
+
+def test_silence_decay_paused_after_recent_entry():
+    """Setelah entry baru (<4 jam), decay jeda — belajar dari hasil trade
+    dulu, bukan langsung melonggarkan lagi."""
+    from ai_trader.gates import apply_silence_decay, default_gates
+    class P:  entry_time = _FUTURE - 600                # entry 10 menit lalu
+    class B:  positions = {"x_idr": P()}; trades = []
+    brain = dict(default_gates())
+    thr0 = brain["entry_threshold"]
+    apply_silence_decay(brain, [], B(), now=_FUTURE)
+    assert brain["entry_threshold"] == thr0
+    assert brain["_silence_anchor"] == _FUTURE

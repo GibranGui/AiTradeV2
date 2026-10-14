@@ -283,7 +283,13 @@ class CoinScanner:
                     diag.data_ok()
                 results.append(r)
             time.sleep(0.1)  # hemat rate-limit
-        results.sort(key=lambda x: -x["score"])
+        # Prioritas entry (FIX "reject >> open"): dulu murni skor aditif ->
+        # kandidat ber-skor tinggi tapi sinyal pas-panan mendahului antrian,
+        # lalu gugur di gerbang `signal >= thr` (thr = ambang belajar AI yang
+        # bisa lebih tinggi dari floor scanner) dan siklus habis tanpa slot.
+        # Sekarang: sinyal terkuat dulu (yang paling pasti lolos konfirmasi),
+        # skor sebagai pemecah seri.
+        results.sort(key=lambda x: (-x["signal"], -x["score"]))
         return results
 
 
@@ -332,14 +338,25 @@ def opportunities(results: list[dict], min_score: float,
                                 "signal_below_entry_floor",
                                 actual=f"signal={sig:+.3f}", required=f">={thr}")
                 continue
-            # konfluensi momentum: sinyal beli kuat tapi 5 bar terakhir turun
-            # tajam = pola reversal sedang terjadi — jangan masuk.
-            if sig > signal_floor and m5 < -0.005:
+            # konfluensi momentum (DILONGGARKAN — bukti bug "reject >> open"):
+            # sebelumnya gerbang ini memakai mom5 (5 bar 1h = 5 jam) dengan
+            # floor yang sama rendahnya dengan ambang konfirmasi -> hampir
+            # SEMUA kandidat bullish ikut gugur hanya karena koreksi sehat
+            # 5 jam, padahal tren menengah masih naik. Sekarang:
+            #   * tolak HANYA jika koreksi dalam (> -1.5%) DAN tren menengah
+            #     ikut melemah (mom20 <= 0);
+            #   * sinyal KUAT (>= 2x floor) bypass — konfluensi indikator
+            #     sudah merupakan konfirmasi itu sendiri;
+            #   * koreksi dangkal di tengah uptrend = peluang entry lebih
+            #     murah, bukan alasan penolakan.
+            strong_bypass = sig >= 2 * max(signal_floor, 0.05)
+            deep_pullback = m5 < -0.015 and r["mom20"] <= 0
+            if not strong_bypass and deep_pullback:
                 if diag:
                     diag.reject(sym, "momentum_conflict",
-                                "bullish_signal_vs_negative_m5",
-                                actual=f"signal={sig:+.3f} mom5={m5:+.3%}",
-                                required="mom5>=-0.5%")
+                                "deep_pullback_in_weak_trend",
+                                actual=f"signal={sig:+.3f} mom5={m5:+.3%} mom20={r['mom20']:+.3%}",
+                                required="mom5>=-1.5% ATAU mom20>0 ATAU signal>=2*floor")
                 continue
         out.append(r)
     return out

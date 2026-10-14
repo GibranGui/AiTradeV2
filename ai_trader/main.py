@@ -397,12 +397,16 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
             break
         if pair in held:
             continue
-        # otak memilih sendiri ambang entry (adaptif, hasil evolusi) — tidak
-        # pernah lebih ketat dari gerbang scanner (hindari dead-gate).
+        # otak memilih sendiri ambang entry (adaptif, hasil evolusi).
+        # FIX "reject >> open": gerbang scanner (floor) dan gerbang konfirmasi
+        # entry (thr) sebelumnya bisa bertentangan — kandidat yang sudah
+        # dinyatakan LOLOS oleh scanner gugur lagi di sini hanya karena AI
+        # sedang dalam fase belajar dengan ambang lebih tinggi. Scanner adalah
+        # SATU-SATUNYA penjaga gerbang peluang; di tahap eksekusi kita hormati
+        # ambang belajar AI HANYA bila ia justru lebih longgar dari floor
+        # (thr = min), tidak pernah memperketat kembali secara senyap.
         thr = min(brain["entry_threshold"], eff_floor if eff_floor > 0 else SIGNAL_FLOOR)
         if opp["signal"] < thr:
-            # seharusnya tak terjangkau lagi (gerbang konfirmasi di
-            # opportunities memakai floor yang sama) — tetap dicatat.
             diag.reject(sym, "strategy_confirmation",
                         "signal_below_entry_floor",
                         actual=f"signal={opp['signal']:+.3f}",

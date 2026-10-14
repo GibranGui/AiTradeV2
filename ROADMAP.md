@@ -116,3 +116,44 @@ loop tampak "berjalan" tapi tidak pernah menuntaskan siklus.
   WAJIB revoke. Workflow Actions memakai `GITHUB_TOKEN` bawaan + secret
   `BOT_PAT` baru (self-dispatch), tidak membutuhkan token itu.
 - API key Indodax real (jika nanti go-live): izin TRADE saja, JANGAN withdraw.
+
+---
+
+# 📌 Checkpoint 2026-10-15 — FIX "reject jauh lebih banyak daripada open"
+
+## Akar masalah (terbukti dari kode, repro teruji)
+1. **Gerbang `momentum_conflict` terlalu mencekik** (`scanner.opportunities`):
+   menolak SEMUA kandidat bullish hanya karena koreksi sehat 5 jam
+   (`mom5 < -0.5%`) padahal tren menengah naik — kandidat tipikal
+   (SOL sig=0.185 mom5=-0.6%) gugur massal.
+2. **Dead-gate dua arah**: scanner meloloskan dengan floor adaptif AI, tetapi
+   ambang entry `brain.entry_threshold` bisa lebih tinggi → kandidat yang
+   sudah dinyatakan lolos tetap ditolak senyap di tahap eksekusi.
+3. **Safety-net kesunyian beku**: `apply_silence_decay` hanya aktif saat TIDAK
+   ada trade DAN posisi → satu posisi menggantung membekukan jangkar selamanya
+   → gerbang tidak pernah melonggar → bot abadi reject tanpa belajar.
+4. **Prioritas antrian salah**: hasil scan diurut skor aditif → kandidat
+   ber-skor tinggi bersinyal lemah mendahului antrian lalu gugur di konfirmasi.
+
+## Perbaikan
+- `scanner.py`: momentum-conflict kini menolak HANYA koreksi dalam (> -1.5%)
+  DAN tren lemah (mom20≤0); sinyal kuat (≥2×floor) bypass; urutkan antrian
+  prioritas = sinyal terkuat dulu (skor pemecah seri).
+- `main.py`: thr entry = min(ambang-belajar-AI, floor scanner) — scanner satu-
+  satunya penjaga peluang, tidak memperketat kembali secara senyap.
+- `gates.py`: decay berbasis *entry terakhir*, bukan *total sunyi* — selama ≥4
+  jam tanpa posisi baru, AI berlatih memberanikan diri meski ada posisi lama.
+
+## Bukti sebelum/sesudah (data kandidat nyata dari log)
+- Sebelum: SOL/XRP/BNB-type kandidat → 0 lolos (semua `momentum_conflict`).
+- Sesudah: SOL, XRP, BNB lolos; DOGE-type (koreksi dalam + tren lemah) tetap
+  ditolak benar. Repro: `tests/test_pipeline.py::test_*momentum*`.
+
+## Tes
+- pytest **36/36 lulus** (baru: shallow-pullback lolos, strong-bypass,
+  silence-decay dgn posisi basi, decay-jeda-setelah-entry).
+- Scan live end-to-end OK; funnel `[SUMMARY]/[FUNNEL]` mencatat semua tahap.
+
+## Catatan
+- Mode tetap PAPER ONLY; batas bawah aman gerbang (ENTRY_THR_MIN dll.) tidak
+  disentuh; fee/likuiditas/penolakan data sintetis tetap utuh.

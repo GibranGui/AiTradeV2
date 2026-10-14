@@ -81,14 +81,23 @@ def _last_activity_ts(broker) -> float:
 
 
 def apply_silence_decay(brain: dict, strategies, broker, now: float | None = None) -> list[str]:
-    """Safety-net anti-'takut-rugi': kalau sudah sangat lama nol transaksi,
+    """Safety-net anti-'takut-rugi': kalau sudah sangat lama tanpa ENTRY BARU,
     AI menurunkan ambangnya sendiri setahap demi setahap (sampai batas bawah).
-    Hanya aktif saat benar-benar sunyi TOTAL (tidak ada trade & tidak ada
-    posisi), sehingga tidak menimpa proses belajar normal."""
+
+    FIX "reject jauh lebih banyak daripada open": sebelumnya safety-net ini
+    hanya aktif saat sunyi TOTAL (nol trade & nol posisi). Akibatnya satu
+    posisi yang menggantung lama membekukan jangkar kesunyian selamanya ->
+    gerbang tidak pernah melonggar -> bot terus-menerus reject tanpa pernah
+    menambah pengalaman. Sekarang yang dihitung adalah KEBERANIAN (entry
+    terakhir): selama tidak ada posisi/baru dibuka, AI berlatih memberanikan
+    diri — meski masih ada posisi lama yang belum selesai."""
     now = now or time.time()
     lessons: list[str] = []
-    if broker.trades or broker.positions:
-        brain["_silence_anchor"] = now       # reset jangkar setiap ada aktivitas
+    last_entry = max([float(p.entry_time or 0) for p in broker.positions.values()]
+                     + [float(t.get("time", 0) or 0) for t in broker.trades]
+                     + [0.0])
+    if last_entry and now - last_entry < SILENCE_DECAY_AFTER_SEC:
+        brain["_silence_anchor"] = now       # baru saja entry -> reset jangkar
         return lessons
     anchor = float(brain.get("_silence_anchor") or now)
     idle = now - anchor
