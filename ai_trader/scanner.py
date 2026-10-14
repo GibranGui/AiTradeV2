@@ -288,7 +288,8 @@ class CoinScanner:
 
 
 def opportunities(results: list[dict], min_score: float,
-                  require_confluence: bool = True, diag=None) -> list[dict]:
+                  require_confluence: bool = True, diag=None,
+                  signal_floor: float | None = None) -> list[dict]:
     """Filter hasil scan menjadi daftar 'peluang tren naik'.
 
     BUG FIX (akar masalah 0 transaksi): skor peluang dihitung dengan rumus
@@ -300,7 +301,13 @@ def opportunities(results: list[dict], min_score: float,
     log apa pun, sehingga bot tampak "hanya scan". Sekarang kedua gerbang
     disatumkan di sini: kandidat harus memenuhi SKOR dan SINYAL sekaligus,
     dan setiap penolakan dicatat lewat diagnostic logging.
+
+    REDESAIN (filosofi baru user): `min_score` & `signal_floor` kini adalah
+    ambang adaptif MILIK AI (dari brain/strategies.json), bukan konstanta
+    template. Nilai default hanya fallback bila pemanggil tidak mengirim.
     """
+    if signal_floor is None:
+        signal_floor = SIGNAL_FLOOR
     out = []
     for r in results:
         sym = r["symbol"]
@@ -315,8 +322,8 @@ def opportunities(results: list[dict], min_score: float,
                             actual=f"mom20={r['mom20']:+.2%} ema_trend<=0")
             continue
         if require_confluence:
-            thr = SIGNAL_FLOOR                  # satu sumber kebenaran; selaras
-                                                # dgn plafon entry di main.py
+            thr = signal_floor              # ambang adaptif AI; selaras dgn
+                                            # plafon entry di main.py
             sig = r["signal"]
             m5 = r["mom5"]
             if sig < thr:
@@ -327,7 +334,7 @@ def opportunities(results: list[dict], min_score: float,
                 continue
             # konfluensi momentum: sinyal beli kuat tapi 5 bar terakhir turun
             # tajam = pola reversal sedang terjadi — jangan masuk.
-            if sig > SIGNAL_FLOOR and m5 < -0.005:
+            if sig > signal_floor and m5 < -0.005:
                 if diag:
                     diag.reject(sym, "momentum_conflict",
                                 "bullish_signal_vs_negative_m5",

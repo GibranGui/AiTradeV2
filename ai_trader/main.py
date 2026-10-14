@@ -50,6 +50,8 @@ from ai_trader.scalper import (Scalper, scalp_exit_decision,
                                SCALP_INTERVAL_MIN, SCALP_MAX_POSITIONS)
 from ai_trader.scanner import (CoinScanner, get_universe, opportunities,
                              DEFAULT_MIN_SCORE, SIGNAL_FLOOR)
+from ai_trader.strategies.portfolio import portfolio_gates
+from ai_trader.gates import apply_silence_decay, sync_brain
 from ai_trader.diag import CycleDiag
 from ai_trader.learning import (
     load_brain, save_brain, learn_from_trade, evolve, run_backtest, log_experience,
@@ -166,8 +168,14 @@ def do_evolve(pair: str, interval_min: int):
           f"fitness={before['fitness']:.2f}")
     strategies, after = evolve(strategies, df, features, brain)
     print(f"  sesudah : return={after['return_pct']:+.2f}% winrate={after['win_rate']:.0%} "
+          f"trades_bt={after.get('trades', 0)} thr_belajar={after.get('entry_thr_used', float('nan')):.2f} "
           f"fitness={after['fitness']:.2f}")
     save_portfolio(strategies)
+    save_brain(brain)      # ambang hasil belajar (entry_threshold) ikut tersimpan
+    g = portfolio_gates(strategies)
+    print(f"  gerbang belajar AI -> entry_thr={g['entry_thr']:.2f} "
+          f"score_min={g['score_min']:.2f} floor={g['signal_floor']:.2f} "
+          f"scalp={g['scalp_strong']:.2f}/{g['scalp_floor']:.2f}")
     print(f"  tersimpan -> {len(strategies)} strategi (strategies.json)")
 
 
@@ -185,14 +193,23 @@ def run_scan_loop(interval_min: int, poll_sec: int, evolve_every: int,
     broker = PaperBroker()
     brain = load_brain()
     strategies = load_portfolio()
+    # benih baru: turunkan keberanian otak ke strategi yang belum punya
+    # riwayat evolusi (entry_thr masih default) agar konsisten satu arah.
+    for s in strategies:
+        if abs(s.entry_thr - 0.20) < 1e-9 and brain["entry_threshold"] < 0.20:
+            s.entry_thr = brain["entry_threshold"]
     scanner = CoinScanner(strategies, brain, interval_min=interval_min)
     scalper = Scalper(strategies)   # jalur kedua: scalping candle 15m
 
+    pg = portfolio_gates(strategies)
     print(f"\n{'=' * 62}\n"
           f"  AI TRADER MULTI-COIN — paper trading | scan pasar IDR\n"
           f"{'=' * 62}")
     print(f"Kas awal : Rp {broker.cash_idr:,.0f} | posisi maks: {MAX_POSITIONS}")
-    print(f"Strategi : {len(strategies)} | ambang skor entry: {min_score:.2f}")
+    print(f"Strategi : {len(strategies)} | GERBANG ADAPTIF MILIK AI: "
+          f"score>={pg['score_min']:.2f} floor>={pg['signal_floor']:.2f} "
+          f"scalp>={pg['scalp_strong']:.2f}/{pg['scalp_floor']:.2f} "
+          f"(bukan template — hasil evolusi & eksplorasi bot sendiri)")
     print(f"Jalur    : TREN candle {interval_min}m + SCALP candle "
           f"{SCALP_INTERVAL_MIN}m (maks {SCALP_MAX_POSITIONS} slot scalp)")
     print(f"Brain    : thr={brain['entry_threshold']:.2f} "
@@ -246,24 +263,43 @@ def run_scan_loop(interval_min: int, poll_sec: int, evolve_every: int,
 def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
                 interval_min, deep_n, min_score, min_vol_idr, evolve_every,
                 scalper=None):
-    """Satu siklus penuh: sweep -> filter -> manajemen posisi -> entry -> evolusi."""
+    """Satu siklus penuh: sweep -> filter -> manajemen posisi -> entry -> evolusi.
+
+    AMBANG = MILIK AI. Konstanta manusia (DEFAULT_MIN_SCORE/SIGNAL_FLOOR) hanya
+    fallback; nilai aktif diambil dari gerbang adaptif portofolio (hasil
+    evolusi backtest) & otak (brain.json), plus safety-net kesunyian yang
+    membuat bot berani mencoba lagi setelah terlalu lama tanpa pengalaman."""
     diag.reset()
-    diag._min_score = min_score
+    # ---- gerbang adaptif: rata-rata bobot ambang tiap strategi + otak ----
+    pg = portfolio_gates(strategies)
+    eff_score = float(np.clip(min(brain.get("score_min", pg["score_min"]),
+                                  pg["score_min"], DEFAULT_MIN_SCORE), 0.35, 0.62))
+    if min_score is not None and min_score != DEFAULT_MIN_SCORE:
+        eff_score = min_score          # override eksplisit CLI tetap dihormati
+    eff_floor = max(brain.get("signal_floor", pg["signal_floor"]),
+                    pg["signal_floor"])
+    brain.setdefault("_silence_anchor", time.time())
+    for l in apply_silence_decay(brain, strategies, broker):
+        print(f"  [BELAJAR] {l}")
+        log_experience({"t": time.time(), "type": "silence_decay", "lesson": l})
+    diag._min_score = eff_score
     ts = time.strftime("%H:%M:%S")
     universe, src = get_universe(min_vol_idr=min_vol_idr)
     diag.market(len(universe), src)
     results = scanner.scan(universe, deep_n=deep_n, diag=diag)
     # [FILTER] gerbang skor+tren+konfirmasi kini terpadu & berlog di scanner
-    opps = opportunities(results, min_score, diag=diag)
+    opps = opportunities(results, eff_score, diag=diag, signal_floor=eff_floor)
     for r in results:
-        if r["score"] >= min_score and r["uptrend"]:
+        if r["score"] >= eff_score and r["uptrend"]:
             diag.score_pass_one()
 
     # ---- JALUR KEDUA: scalping candle 15 menit (peluang jangka pendek) ----
     scalp_results, scalp_opps = [], []
     if scalper is not None:
         scalp_results = scalper.scan(universe, deep_n=max(deep_n, 10), diag=diag)
-        scalp_opps = scalper.scalp_opportunities(scalp_results, diag=diag)
+        scalp_opps = scalper.scalp_opportunities(
+            scalp_results, diag=diag,
+            strong_thr=pg["scalp_strong"], floor_thr=pg["scalp_floor"])
         scalper.strategies = strategies      # sinkron pasca-evolusi
     scalp_pairs = {r["pair"] for r in scalp_results}
 
@@ -361,9 +397,9 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
             break
         if pair in held:
             continue
-        # otak boleh melonggarkan sendiri sampai SIGNAL_FLOOR; tidak
+        # otak memilih sendiri ambang entry (adaptif, hasil evolusi) — tidak
         # pernah lebih ketat dari gerbang scanner (hindari dead-gate).
-        thr = min(brain["entry_threshold"], SIGNAL_FLOOR)
+        thr = min(brain["entry_threshold"], eff_floor if eff_floor > 0 else SIGNAL_FLOOR)
         if opp["signal"] < thr:
             # seharusnya tak terjangkau lagi (gerbang konfirmasi di
             # opportunities memakai floor yang sama) — tetap dicatat.
@@ -443,17 +479,31 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
     # antar-siklus tanpa mengubah perilaku asli (interval evolve_every menit).
     if time.time() - getattr(scanner, "_last_evolve", time.time()) > evolve_every * 60:
         print("  >> AI melakukan evolusi strategi (self-improvement)...")
-        df, _ = fetch_ohlcv_or_synthetic("btc_idr", period=str(interval_min), limit=500)
+        # multi-koin: BTC + ETH sebagai proksi pasar; varian nol-trade dihukum
+        # di fitness sehingga AI belajar memilih ambang yang BERANI entry.
+        import pandas as pd
+        frames = []
+        for p in ("btc_idr", "eth_idr"):
+            d, live = fetch_ohlcv_or_synthetic(p, period=str(interval_min), limit=500)
+            if d is not None and len(d) >= 120 and live:
+                frames.append(d.reset_index(drop=True))
+        if not frames:
+            df, _ = fetch_ohlcv_or_synthetic("btc_idr", period=str(interval_min), limit=500)
+            frames = [df.reset_index(drop=True)]
+        df = pd.concat(frames, ignore_index=True)
         features = normalize_signal_features(build_features(df))
         new_strat, res = evolve(scanner.strategies, df, features, brain)
         save_portfolio(new_strat)
         save_brain(brain)
         scanner.strategies = new_strat
+        strategies[:] = new_strat          # refleksi ke pemanggil siklus
         if scalper is not None:
             scalper.strategies = new_strat   # scalp ikut strategi hasil evolusi
         scanner._last_evolve = time.time()
         print(f"     hasil evolusi: return={res['return_pct']:+.2f}% "
-              f"winrate={res['win_rate']:.0%} fitness={res['fitness']:.2f}")
+              f"winrate={res['win_rate']:.0%} trades_bt={res.get('trades', 0)} "
+              f"thr_belajar={res.get('entry_thr_used', float('nan')):.2f} "
+              f"fitness={res['fitness']:.2f}")
 
 
 def do_list(deep_n: int, min_score: float, min_vol_idr: float, interval_min: int):
@@ -468,30 +518,40 @@ def do_list(deep_n: int, min_score: float, min_vol_idr: float, interval_min: int
     strategies = load_portfolio()
     scanner = CoinScanner(strategies, brain, interval_min=interval_min)
     scalper = Scalper(strategies)   # jalur kedua: scalping candle 15m
+    # tampilkan gerbang adaptif AI yang AKTIF (sama dgn loop trading)
+    pg = portfolio_gates(strategies)
+    eff_score = float(np.clip(min(brain.get("score_min", pg["score_min"]),
+                                  pg["score_min"], DEFAULT_MIN_SCORE), 0.35, 0.62))
+    if min_score != DEFAULT_MIN_SCORE:
+        eff_score = min_score
+    eff_floor = max(brain.get("signal_floor", pg["signal_floor"]), pg["signal_floor"])
     universe, src = get_universe(min_vol_idr=min_vol_idr)
     diag = CycleDiag()
     diag.reset()
-    diag._min_score = min_score
+    diag._min_score = eff_score
     diag.market(len(universe), src)
-    print(f"Memindai {len(universe)} pasar IDR (sumber: {src})...")
+    print(f"Memindai {len(universe)} pasar IDR (sumber: {src})... "
+          f"[gerbang belajar AI: skor>={eff_score:.2f} floor>={eff_floor:.2f}]")
     results = scanner.scan(universe, deep_n=deep_n, diag=diag)
-    opps = opportunities(results, min_score, diag=diag)
+    opps = opportunities(results, eff_score, diag=diag, signal_floor=eff_floor)
     for r in results:
-        if r["score"] >= min_score and r["uptrend"]:
+        if r["score"] >= eff_score and r["uptrend"]:
             diag.score_pass_one()
     print(f"\n{'KOIN':<12} {'SKOR':>6} {'SINYAL':>8} {'MOM24H':>8} {'MOM20B':>8} "
           f"{'VOL24H(IDR)':>14} TREN")
     print("-" * 70)
     for r in results:
         flag = "SIAP-ENTRY ✓" if any(o is r for o in opps) else \
-               ("NAIK" if r["uptrend"] and r["score"] >= min_score else
+               ("NAIK" if r["uptrend"] and r["score"] >= eff_score else
                 ("netral" if r["uptrend"] else "turun"))
         print(f"{r['symbol']:<12} {r['score']:>6.2f} {r['signal']:>+8.2f} "
               f"{r['chg24h_pct']:>7.1f}% {r['mom20']:>+7.2%} "
               f"{r['vol_idr_24h']:>14,.0f} {flag}")
     # jalur scalp 15m — peluang jangka pendek
     scalp_results = scalper.scan(universe, deep_n=max(deep_n, 10), diag=diag)
-    scalp_opps = scalper.scalp_opportunities(scalp_results, diag=diag)
+    scalp_opps = scalper.scalp_opportunities(
+        scalp_results, diag=diag,
+        strong_thr=pg["scalp_strong"], floor_thr=pg["scalp_floor"])
     if scalp_results:
         print(f"\n-- SCALP 15m: {len(scalp_results)} kandidat dianalisis, "
               f"{len(scalp_opps)} lolos gerbang scalp --")
@@ -502,10 +562,11 @@ def do_list(deep_n: int, min_score: float, min_vol_idr: float, interval_min: int
                   f"volSup={r['vol_support']:+.2f}")
     if scalp_opps:
         print(f"=> {len(scalp_opps)} PELUANG SCALP SIAP-ENTRY "
-              f"(sig>={0.10}, mom5>0, EMA>0, volume mendukung, chg24h<=18%)")
+              f"(gerbang belajar AI: sig>={pg['scalp_strong']:.2f} ATAU "
+              f"(>={pg['scalp_floor']:.2f} & mom12>0 & EMA>0), volume mendukung, chg24h<=18%)")
 
-    print(f"\n=> {len(opps)} PELUANG SIAP-ENTRY (skor >= {min_score:.2f}, "
-          f"uptrend, DAN sinyal >= {SIGNAL_FLOOR}): "
+    print(f"\n=> {len(opps)} PELUANG SIAP-ENTRY (skor >= {eff_score:.2f}, "
+          f"uptrend, DAN sinyal >= {eff_floor:.2f}) [ambang hasil belajar AI]: "
           + (", ".join(o["symbol"] for o in opps) or "(kosong)"))
     diag.summary(1, len(opps), MAX_POSITIONS, 0.0)
 

@@ -18,14 +18,20 @@ import os
 import time
 import numpy as np
 
-from .strategies.portfolio import Strategy, combined_signal, mutate, save_portfolio
+from .strategies.portfolio import (
+    Strategy, combined_signal, mutate, save_portfolio, portfolio_gates,
+)
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 EXPERIENCE_PATH = os.path.join(DATA_DIR, "experience_buffer.jsonl")
 BRAIN_PATH = os.path.join(DATA_DIR, "brain.json")
 
+from .gates import sync_brain, ENTRY_THR_MIN, ENTRY_THR_MAX
+
 DEFAULT_BRAIN = {
-    "entry_threshold": 0.25,   # |sinyal gabungan| minimal untuk masuk
+    "entry_threshold": 0.20,   # nilai AWAL — AI yang menyesuaikan sendiri
+                               #   (evolusi + safety-net kesunyian), bukan
+                               #   template mati manusia (dulu 0.25)
     "stop_loss_pct": 0.02,     # 2%
     "take_profit_pct": 0.035,  # 3.5%
     "alloc_frac": 0.5,         # fraksi kas per posisi
@@ -40,10 +46,10 @@ def load_brain() -> dict:
         try:
             with open(BRAIN_PATH) as f:
                 b = json.load(f)
-            return {**DEFAULT_BRAIN, **b}
+            return sync_brain({**DEFAULT_BRAIN, **b})
         except Exception:
             pass
-    return dict(DEFAULT_BRAIN)
+    return sync_brain(dict(DEFAULT_BRAIN))
 
 
 def save_brain(brain: dict):
@@ -141,13 +147,23 @@ def learn_from_trade(trade: dict, strategies: list[Strategy], brain: dict) -> li
         if pnl_pct < -brain["stop_loss_pct"] * 1.5:
             brain["stop_loss_pct"] = round(max(0.008, brain["stop_loss_pct"] * 0.9), 4)
             lessons.append(f"stop_loss diperketat -> {brain['stop_loss_pct']:.3%}")
-        brain["entry_threshold"] = min(0.7, brain["entry_threshold"] + 0.02)
+        # batas atas dikendurkan 0.7 -> 0.45 (gates.ENTRY_THR_MAX): kenaikan
+        # tetap ada (belajar dari rugi) tapi tak boleh mencekik proses belajar
+        brain["entry_threshold"] = min(0.45, brain["entry_threshold"] + 0.02)
         lessons.append(f"entry_threshold dinaikkan -> {brain['entry_threshold']:.2f} (lebih selektif)")
     else:
         brain["total_wins"] += 1
-        # sering profit kecil? longgarkan sedikit agar frekuensi naik
+        # PROFIT ADALAH GURU TERBAIK: setelah trade untung, AI BERANI
+        # menurunkan ambangnya sendiri (bukan cuma tiap 5 win) supaya
+        # frekuensi belajar naik — sesuai filosofi "takut-takut kapan belajar".
+        old_thr = brain["entry_threshold"]
+        brain["entry_threshold"] = max(0.10, round(old_thr - 0.01, 3))
+        if brain["entry_threshold"] < old_thr - 1e-6:
+            lessons.append(f"profit -> entry_threshold DITURUNKAN sendiri "
+                           f"{old_thr:.2f}->{brain['entry_threshold']:.2f} "
+                           f"(perbanyak pengalaman)")
         if brain["total_wins"] % 5 == 0:
-            brain["entry_threshold"] = max(0.2, brain["entry_threshold"] - 0.01)
+            brain["entry_threshold"] = max(0.10, round(brain["entry_threshold"] - 0.01, 3))
             lessons.append(f"entry_threshold dilonggarkan -> {brain['entry_threshold']:.2f}")
 
     total = brain["total_wins"] + brain["total_losses"]
@@ -175,14 +191,21 @@ def run_backtest(strategies: list[Strategy], df, features, brain: dict,
 
     Urutan argumen disamakan dengan combined_signal(strategies, features, i):
     (strategies, df, features, brain).
+
+    Threshold entry yang dipakai = rata-rata gerbang adaptif portofolio
+    (portfolio_gates), BUKAN angka template — sehingga evolusi bisa belajar
+    "berapa ambang yang tepat" bersamaan dengan bobot & parameter strategi.
     """
+    from .gates import ENTRY_THR_MIN, ENTRY_THR_MAX   # lokal: hindari siklus impor
     n = len(df)
     # Akuntansi equity-based: eq = kas + nilai pasar posisi. Pembelian memakai
     # fraksi tetap dari EKUITAS (bukan seluruh sisa kas) sehingga tidak ada
     # "uang hantu" yang membuat return backtest membengkak secara artifisial.
     cash, pos_qty, entry_px = 1.0, 0.0, 0.0
     eq_curve, trades = [], []
-    thr, sl, tp = brain["entry_threshold"], brain["stop_loss_pct"], brain["take_profit_pct"]
+    thr = float(np.clip(portfolio_gates(strategies)["entry_thr"],
+                        ENTRY_THR_MIN, ENTRY_THR_MAX))
+    sl, tp = brain["stop_loss_pct"], brain["take_profit_pct"]
     alloc = float(brain.get("alloc_frac", 0.5))
     close = df["close"].values
     atr_series = features["atr_raw"] if "atr_raw" in features else None
@@ -232,9 +255,18 @@ def run_backtest(strategies: list[Strategy], df, features, brain: dict,
         r = np.diff(eq_curve) / np.array(eq_curve[:-1])
         sharpe = float(r.mean() / (r.std() + 1e-9) * np.sqrt(24 * 365))
     fitness = ret * 100 + 20 * (len(wins) / max(1, len(trades))) - dd * 50 + sharpe * 2
+    # ---- insentif aktivitas ("bot harus berani trading untuk belajar") ----
+    # Varian yang menghasilkan NOL trade tidak memberi AI pengalaman apa pun,
+    # jadi dihukum keras; varian dengan sedikit trade diberi bonus kecil agar
+    # evolusi TIDAK memilih ambang super longgar demi membanjiri transaksi.
+    ntr = len(trades)
+    if ntr == 0:
+        fitness -= 40.0
+    elif ntr < 5:
+        fitness += 6.0 * ntr / 5.0
     return {"return_pct": ret * 100, "win_rate": len(wins) / max(1, len(trades)),
             "trades": len(trades), "max_dd_pct": dd * 100, "sharpe": sharpe,
-            "fitness": fitness}
+            "entry_thr_used": thr, "fitness": fitness}
 
 
 def evolve(strategies: list[Strategy], df, features, brain: dict,
@@ -246,6 +278,7 @@ def evolve(strategies: list[Strategy], df, features, brain: dict,
     menyimpan kode konfigurasi yang lebih baik.
     """
     best = strategies
+    gates_before = portfolio_gates(best)
     best_res = run_backtest(best, df, features, brain)
     history = [best_res]
 
@@ -267,6 +300,24 @@ def evolve(strategies: list[Strategy], df, features, brain: dict,
     for s in best:
         s.fitness = round(best_res["fitness"], 3)
 
+    # ---- sinkronisasi dua arah antara otak & gerbang portofolio ----
+    # Ambang hasil evolusi (portfolio_gates) dipromosikan ke brain sebagai
+    # ambang aktif bot; brain yang lebih berani juga menular ke strategi
+    # baru agar benih awal tidak terlalu ketat.
+    evolved_thr = float(best_res.get("entry_thr_used", brain["entry_threshold"]))
+    brain["entry_threshold"] = round(float(np.clip(
+        min(evolved_thr, max(brain["entry_threshold"], ENTRY_THR_MIN)),
+        ENTRY_THR_MIN, ENTRY_THR_MAX)), 3)
+    g = portfolio_gates(best)
+    if g["entry_thr"] < brain["entry_threshold"]:
+        brain["entry_threshold"] = round(g["entry_thr"], 3)
+
     log_experience({"t": time.time(), "type": "evolve", "result": best_res,
-                    "generations": generations})
+                    "generations": generations,
+                    "gates_before": gates_before,
+                    "gates_after": {k: getattr(best[0], k) for k in
+                                    ("entry_thr", "score_min", "signal_floor",
+                                     "scalp_strong", "scalp_floor")}
+                    if best else {},
+                    "brain_entry_threshold": brain["entry_threshold"]})
     return best, best_res

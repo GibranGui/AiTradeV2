@@ -110,10 +110,18 @@ class Scalper:
         self._cache[pair] = (time.time(), result)
         return result
 
-    # ---------- gerbang peluang scalp ----------
-    def scalp_opportunities(self, results: list[dict], diag=None) -> list[dict]:
-        """Filter ketat namun realistis untuk horizon 15m. Setiap penolakan
-        dicatat lengkap (simbol, tahap, alasan, nilai aktual vs ambang)."""
+    # ---------- gerbang peluang scalp (AMBANG ADAPTIF MILIK AI) ----------
+    def scalp_opportunities(self, results: list[dict], diag=None,
+                            strong_thr: float | None = None,
+                            floor_thr: float | None = None) -> list[dict]:
+        """Filter untuk horizon 15m. Ambang default = konstanta modul (fallback);
+        loop trading mengirim `strong_thr`/`floor_thr` hasil evolusi AI sehingga
+        bot menentukan sendiri seberani apa iascalping. Setiap penolakan dicatat
+        lengkap (simbol, tahap, alasan, nilai aktual vs ambang)."""
+        if strong_thr is None:
+            strong_thr = SCALP_STRONG_SIGNAL
+        if floor_thr is None:
+            floor_thr = SCALP_SIGNAL_FLOOR
         out = []
         for r in results:
             sym = r["symbol"]
@@ -124,14 +132,14 @@ class Scalper:
                                 required=f"<={SCALP_MAX_CHG24H}%")
                 continue
             # Dua jalur lolos (berdasarkan backtest data live):
-            #  A) sinyal KUAT >= 0.20 — edge gross terbaik, tidak butuh mom5;
+            #  A) sinyal KUAT >= strong_thr — edge terkuat, lolos tanpa syarat lain;
             #  B) sinyal sedang + momentum 1-jam positif + EMA naik.
-            strong = r["signal"] >= SCALP_STRONG_SIGNAL
-            mid_ok = (r["signal"] >= SCALP_SIGNAL_FLOOR
+            strong = r["signal"] >= strong_thr
+            mid_ok = (r["signal"] >= floor_thr
                       and r.get("mom12", r["mom5"]) > 0 and r["ema_ok"])
             if not (strong or mid_ok):
                 if diag:
-                    req = f"signal>={SCALP_STRONG_SIGNAL} ATAU (>={SCALP_SIGNAL_FLOOR} & mom12>0 & ema>0)"
+                    req = f"signal>={strong_thr:.2f} ATAU (>={floor_thr:.2f} & mom12>0 & ema>0)"
                     diag.reject(sym, "scalp_filter", "signal_below_floor",
                                 actual=f"signal={r['signal']:+.3f} mom12={r.get('mom12', 0):+.3%} ema_ok={r['ema_ok']}",
                                 required=req)

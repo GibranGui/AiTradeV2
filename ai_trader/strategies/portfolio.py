@@ -15,6 +15,8 @@ from dataclasses import dataclass, field, asdict
 import numpy as np
 import pandas as pd
 
+from ..gates import ENTRY_THR_MIN, ENTRY_THR_MAX, SCORE_THR_MIN, gate_snapshot
+
 
 @dataclass
 class Strategy:
@@ -26,6 +28,12 @@ class Strategy:
     fitness: float = 0.0            # skor hasil backtest terakhir
     wins: int = 0
     losses: int = 0
+    # ---- gerbang adaptif MILIK AI (bukan template manusia) ----
+    entry_thr: float = 0.20         # ambang sinyal untuk strategi ini
+    score_min: float = 0.45         # ambang skor peluang tren (jalur tren)
+    signal_floor: float = 0.08      # konfirmasi arah minimal (jalur tren)
+    scalp_strong: float = 0.15      # jalur A scalp: sinyal kuat tanpa syarat lain
+    scalp_floor: float = 0.06       # jalur B scalp: sinyal sedang + konfluensi
 
     def to_dict(self):
         return asdict(self)
@@ -202,10 +210,28 @@ def load_portfolio(path: str = STATE_PATH) -> list[Strategy]:
     if os.path.exists(path):
         try:
             with open(path) as fp:
-                return [Strategy.from_dict(d) for d in json.load(fp)]
+                rows = json.load(fp)
+            # migrasi state lama (belum punya field gerbang adaptif):
+            # Strategy(**d) menolak kunci asing & kehilangan default baru,
+            # jadi saring hanya ke field yang dikenal dataclass.
+            known = {f.name for f in __import__("dataclasses").fields(Strategy)}
+            return [Strategy(**{k: v for k, v in d.items() if k in known})
+                    for d in rows]
         except Exception:
             pass
     return default_portfolio()
+
+
+def portfolio_gates(strategies: list[Strategy]) -> dict:
+    """Ambang AKTIF portofolio = rata-rata bobot gerbang tiap strategi.
+    Inilah 'keberanian' yang dipilih AI sendiri — bukan template manusia."""
+    tw = sum(max(0.05, s.weight) for s in strategies) or 1.0
+    g = {}
+    for key in ("entry_thr", "score_min", "signal_floor",
+                "scalp_strong", "scalp_floor"):
+        g[key] = float(sum(max(0.05, s.weight) * getattr(s, key)
+                           for s in strategies) / tw)
+    return g
 
 
 PARAM_BOUNDS = {
@@ -221,12 +247,23 @@ def _bounds_for(key: str, strategy: "Strategy", v: float):
     return PARAM_BOUNDS.get(key, (v * 0.5, v * 2.0 + 1e-9))
 
 
+GATE_BOUNDS = {          # rentang gerbang adaptif — batas aman, BUKAN nilai tetap
+    "entry_thr":    (ENTRY_THR_MIN, ENTRY_THR_MAX),
+    "score_min":    (SCORE_THR_MIN, 0.62),
+    "signal_floor": (0.0, 0.30),
+    "scalp_strong": (0.10, 0.40),
+    "scalp_floor":  (0.04, 0.30),
+}
+
+
 def mutate(strategies: list[Strategy], rate: float = 0.3, rng: random.Random | None = None) -> list[Strategy]:
-    """Mutasi parameter & bobot strategi — mekanisme 'self-modifying' AI.
+    """Mutasi parameter, bobot, DAN gerbang strategi — mekanisme 'self-modifying' AI.
 
     AI tidak menulis ulang file .py secara sembarangan; ia berevolusi pada
-    ruang parameter/bobot yang tervalidasi (disimpan di strategies.json),
-    sehingga aman dari crash/injeksi kode.
+    ruang parameter/bobot/ambang yang tervalidasi (disimpan di strategies.json),
+    sehingga aman dari crash/injeksi kode. Gerbang entry kini ikut bermutasi:
+    ambang bukan lagi template manusia — AI menemukannya lewat backtest
+    (fitness memberi penalti keras pada varian nol-trade, lihat learning.evolve).
     """
     rng = rng or random.Random()
     new = copy.deepcopy(strategies)
@@ -237,6 +274,11 @@ def mutate(strategies: list[Strategy], rate: float = 0.3, rng: random.Random | N
             lo, hi = _bounds_for(k, s, v)
             if rng.random() < rate:
                 s.params[k] = round(float(np.clip(v * rng.uniform(0.8, 1.2), lo, hi)), 3)
+        # ---- mutasi gerbang adaptif milik AI ----
+        for gk, (glo, ghi) in GATE_BOUNDS.items():
+            if rng.random() < rate:
+                cur = getattr(s, gk)
+                setattr(s, gk, round(float(np.clip(cur * rng.uniform(0.75, 1.35), glo, ghi)), 3))
     # Kadang AI "menulis" strategi baru dari template yang ada
     if rng.random() < 0.15 and len(new) < 14:
         base = rng.choice(new)
@@ -246,5 +288,7 @@ def mutate(strategies: list[Strategy], rate: float = 0.3, rng: random.Random | N
         child.fitness = 0.0
         for k in child.params:
             child.params[k] = round(child.params[k] * rng.uniform(0.7, 1.3), 3)
+        for gk, (glo, ghi) in GATE_BOUNDS.items():
+            setattr(child, gk, round(float(np.clip(getattr(child, gk) * rng.uniform(0.7, 1.3), glo, ghi)), 3))
         new.append(child)
     return new
