@@ -53,6 +53,7 @@ class PaperBroker:
         self.cash_idr = start_idr
         self.positions: dict[str, Position] = {}   # pair -> Position
         self.trades: list[dict] = []
+        self.last_reject: str | None = None   # alasan penolakan buy terakhir
         self._load()
 
     # properti tunggal untuk kompatibilitas kode lama: posisi pertama (atau None)
@@ -94,13 +95,25 @@ class PaperBroker:
 
     # ---------- eksekusi ----------
     def buy(self, pair: str, price: float, features: dict, alloc: float = 1.0) -> dict | None:
-        """Beli koin tertentu. alloc: fraksi dari KAS TERSISA yang dipakai (0..1)."""
-        if pair in self.positions or price <= 0:
+        """Beli koin tertentu. alloc: fraksi dari KAS TERSISA yang dipakai (0..1).
+
+        BUG FIX (silent failure): setiap penolakan kini disimpan di
+        `self.last_reject` beserta alasannya, supaya pemanggil bisa mencatat
+        kegagalan eksekusi alih-alih hanya menerima `None` tanpa penjelasan.
+        """
+        self.last_reject = None
+        if pair in self.positions:
+            self.last_reject = "already_holding_pair"
+            return None
+        if price <= 0:
+            self.last_reject = f"invalid_price({price})"
             return None
         if len(self.positions) >= MAX_POSITIONS:
+            self.last_reject = "max_positions_reached"
             return None
         spend = self.cash_idr * alloc
         if spend < 50_000:  # min trade ~50rb IDR
+            self.last_reject = f"insufficient_available_balance(spend={spend:.0f}<50000)"
             return None
         fee = spend * FEE
         qty = (spend - fee) / price

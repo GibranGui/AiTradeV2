@@ -192,15 +192,25 @@ class CoinScanner:
         self.cache_sec = cache_sec
         self._cache: dict[str, tuple[float, dict]] = {}   # pair -> (ts, hasil)
 
-    def analyze(self, coin: dict) -> dict | None:
+    def analyze(self, coin: dict, diag=None) -> dict | None:
         pair = coin["pair"]
         hit = self._cache.get(pair)
         if hit and time.time() - hit[0] < self.cache_sec:
             return hit[1]
-        df, is_live = fetch_ohlcv_or_synthetic(
-            pair, period=str(self.interval_min), limit=self.limit)
+        try:
+            df, is_live = fetch_ohlcv_or_synthetic(
+                pair, period=str(self.interval_min), limit=self.limit)
+        except Exception as e:                       # jangan hentikan seluruh siklus
+            if diag:
+                diag.data_bad(coin["symbol"], "fetch_exception", str(e)[:80])
+            return None
         if df is None or len(df) < 60 or not is_live:
             # JANGAN pernah trading/skor dari data sintetis — hanya candle asli.
+            if diag:
+                nbar = 0 if df is None else len(df)
+                why = ("sintetis" if (df is not None and nbar >= 60 and not is_live)
+                       else f"bar={nbar}<60")
+                diag.data_bad(coin["symbol"], "candle_data_incomplete", why)
             return None
         feats = normalize_signal_features(build_features(df))
         i = len(feats) - 1
@@ -236,7 +246,7 @@ class CoinScanner:
         self._cache[pair] = (time.time(), result)
         return result
 
-    def scan(self, universe: list[dict], deep_n: int = 8) -> list[dict]:
+    def scan(self, universe: list[dict], deep_n: int = 8, diag=None) -> list[dict]:
         """Sweep -> prescreen -> analisis mendalam -> ranking final.
 
         Prinsip gstack "sweep wide, act narrow": kandidat yang layak dianalisis
@@ -252,16 +262,65 @@ class CoinScanner:
         # urutkan prioritas: volume terbesar dulu (likuiditas = mudah exit)
         cands.sort(key=lambda u: -u["vol_idr_24h"])
         cands = cands[:max(deep_n, 10)]          # minimal 10 kandidat per siklus
+        if diag:
+            diag.deep_start(len(cands))
         results = []
         for c in cands:
-            r = self.analyze(c)
+            r = self.analyze(c, diag=diag)
             if r:
+                if diag:
+                    diag.data_ok()
                 results.append(r)
             time.sleep(0.1)  # hemat rate-limit
         results.sort(key=lambda x: -x["score"])
         return results
 
 
-def opportunities(results: list[dict], min_score: float) -> list[dict]:
-    """Filter hasil scan menjadi daftar 'peluang tren naik'."""
-    return [r for r in results if r["score"] >= min_score and r["uptrend"]]
+def opportunities(results: list[dict], min_score: float,
+                  require_confluence: bool = True, diag=None) -> list[dict]:
+    """Filter hasil scan menjadi daftar 'peluang tren naik'.
+
+    BUG FIX (akar masalah 0 transaksi): skor peluang dihitung dengan rumus
+    ADITIF — 35% konfluensi strategi + 25% momentum 5-bar + 20% uptrend + ...
+    Artinya koin dengan momentum/volume kuat tapi sinyal strategi masih kecil
+    (mis. 0.19) bisa menembus ambang 0.62, padahal konfirmasi arah WAJIB
+    (main.py menolak bila signal < ~0.15). Sebelum fix ini, setiap kandidat
+    yang lolos gerbang skor justru GUGUR di gerbang konfirmasi — tanpa jejak
+    log apa pun, sehingga bot tampak "hanya scan". Sekarang kedua gerbang
+    disatumkan di sini: kandidat harus memenuhi SKOR dan SINYAL sekaligus,
+    dan setiap penolakan dicatat lewat diagnostic logging.
+    """
+    out = []
+    for r in results:
+        sym = r["symbol"]
+        if r["score"] < min_score:
+            if diag:
+                diag.reject(sym, "score_filter", "score_below_threshold",
+                            actual=f"{r['score']:.3f}", required=f"{min_score:.2f}")
+            continue
+        if not r["uptrend"]:
+            if diag:
+                diag.reject(sym, "trend_filter", "not_uptrend",
+                            actual=f"mom20={r['mom20']:+.2%} ema_trend<=0")
+            continue
+        if require_confluence:
+            thr = 0.15                          # sama dengan batas bawah entry main.py
+            sig = r["signal"]
+            m5 = r["mom5"]
+            if sig < thr:
+                if diag:
+                    diag.reject(sym, "strategy_confirmation",
+                                "signal_below_entry_floor",
+                                actual=f"signal={sig:+.3f}", required=f">={thr}")
+                continue
+            # konfluensi momentum: sinyal beli kuat tapi 5 bar terakhir turun
+            # tajam = pola reversal sedang terjadi — jangan masuk.
+            if sig > 0.15 and m5 < -0.005:
+                if diag:
+                    diag.reject(sym, "momentum_conflict",
+                                "bullish_signal_vs_negative_m5",
+                                actual=f"signal={sig:+.3f} mom5={m5:+.3%}",
+                                required="mom5>=-0.5%")
+                continue
+        out.append(r)
+    return out

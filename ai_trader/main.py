@@ -47,6 +47,7 @@ from ai_trader.strategies.portfolio import (
 )
 from ai_trader.paper_broker import PaperBroker, FEE, MAX_POSITIONS
 from ai_trader.scanner import CoinScanner, get_universe, opportunities
+from ai_trader.diag import CycleDiag
 from ai_trader.learning import (
     load_brain, save_brain, learn_from_trade, evolve, run_backtest, log_experience,
 )
@@ -80,7 +81,6 @@ def run_loop(pair: str, interval_min: int, poll_sec: int, evolve_every: int,
     print(f"Brain: thr={brain['entry_threshold']:.2f} SL={brain['stop_loss_pct']:.2%} "
           f"TP={brain['take_profit_pct']:.2%} alloc={brain['alloc_frac']:.0%}\n")
 
-    last_evolve = time.time()
     cycle = 0
     try:
         while time.time() < _deadline:
@@ -172,7 +172,12 @@ def run_scan_loop(interval_min: int, poll_sec: int, evolve_every: int,
                   deep_n: int, min_score: float, min_vol_idr: float,
                   max_minutes: float = 0.0):
     """MODE MULTI-KOIN: pindai seluruh pasar IDR tiap siklus, tradingi koin
-    yang menunjukkan peluang tren naik. Tidak terpaku pada satu koin."""
+    yang menunjukkan peluang tren naik. Tidak terpaku pada satu koin.
+
+    ROBUSTNESS (fase pengujian #10): setiap siklus dibungkus try/except —
+    kegagalan tak terduga (mis. data korup, bug dependensi) dicatat dan
+    siklus berikutnya tetap berjalan; loop tidak pernah mati senyap.
+    """
     _deadline = time.time() + (max_minutes * 60 if max_minutes > 0 else 1e12)
     broker = PaperBroker()
     brain = load_brain()
@@ -188,145 +193,210 @@ def run_scan_loop(interval_min: int, poll_sec: int, evolve_every: int,
           f"SL={brain['stop_loss_pct']:.2%} TP={brain['take_profit_pct']:.2%} "
           f"alloc={brain['alloc_frac']:.0%}\n")
 
-    last_evolve = time.time()
     cycle = 0
+    diag = CycleDiag()
     try:
         while time.time() < _deadline:
             cycle += 1
-            ts = time.strftime("%H:%M:%S")
-            universe, src = get_universe(min_vol_idr=min_vol_idr)
-            results = scanner.scan(universe, deep_n=deep_n)
-            opps = opportunities(results, min_score)
-
-            # harga live Indodax untuk semua pair yang relevan (posisi + kandidat)
-            pairs = {p["pair"] for p in results} | set(broker.positions)
-            prices: dict[str, float] = {}
-            for p in pairs:
-                px = broker.current_price(p)
-                if px is None:
-                    r = next((x for x in results if x["pair"] == p), None)
-                    px = r["last_close"] if r else None
-                if px:
-                    prices[p] = px
-
-            eq = broker.equity(prices)
-            pos_txt = ", ".join(
-                f"{k.split('_')[0].upper()}({prices[k] / broker.positions[k].entry_price - 1:+.1%})"
-                if k in prices else k.split('_')[0].upper()
-                for k in broker.positions) or "-"
-            print(f"[{ts}] pasar={len(universe)} ({src}) kandidat={len(results)} "
-                  f"peluang={len(opps)} ekuitas=Rp{eq:,.0f} posisi=[{pos_txt}]")
-
-            # ---- manajemen SEMUA posisi (TP/SL/trailing/sinyal) ----
-            for pair in list(broker.positions):
-                pos = broker.positions[pair]
-                price = prices.get(pair)
-                if price is None:
-                    continue
-                chg = price / pos.entry_price - 1
-                peak = pos.entry_features.get("_peak_chg", 0.0)
-                if chg > peak:
-                    pos.entry_features["_peak_chg"] = chg
-                    peak = chg
-                reason = None
-                if chg <= -brain["stop_loss_pct"]:
-                    reason = "stop_loss"
-                elif chg >= brain["take_profit_pct"]:
-                    reason = "take_profit"
-                elif peak >= brain["take_profit_pct"] * 0.6 and \
-                        chg < peak - max(brain["stop_loss_pct"], 0.02):
-                    reason = "trailing_stop"      # kunci profit saat tren patah
-                else:
-                    res = next((x for x in results if x["pair"] == pair), None)
-                    sig_now = res["signal"] if res else None
-                    if sig_now is None:
-                        df, _ = fetch_ohlcv_or_synthetic(
-                            pair, period=str(interval_min), limit=300)
-                        if df is not None and len(df) >= 60:
-                            f2 = normalize_signal_features(build_features(df))
-                            sig_now = combined_signal(strategies, f2, len(f2) - 1)
-                    if sig_now is not None and sig_now < -brain["entry_threshold"] * 0.5:
-                        reason = "signal_exit"
-                if reason:
-                    trade = broker.sell(pair, price, reason)
-                    if trade:
-                        lessons = learn_from_trade(trade, strategies, brain)
-                        save_brain(brain)
-                        save_portfolio(strategies)
-                        print(f"  >> JUAL {pair.split('_')[0].upper()} ({reason}) "
-                              f"PnL: Rp {trade['pnl']:,.0f} ({trade['pnl_pct']:+.2%})")
-                        for l in lessons:
-                            print(f"     [BELAJAR] {l}")
-
-            # ---- entry: beli peluang tren naik terbaik (multi-koin) ----
-            held = set(broker.positions)
-            for opp in opps:                      # sudah terurut skor desc
-                if len(broker.positions) >= MAX_POSITIONS:
-                    break
-                pair = opp["pair"]
-                if pair in held:
-                    continue
-                thr = min(brain["entry_threshold"], 0.15)
-                if opp["signal"] < thr:
-                    continue      # konfirmasi arah: sinyal gabungan tidak boleh negatif kuat
-                price = prices.get(pair) or opp["last_close"]
-                feats_snap = {k: v for k, v in opp["features"].items()}
-                feats_snap["_scan_score"] = opp["score"]
-                trade = broker.buy(pair, price, feats_snap, alloc=brain["alloc_frac"])
-                if trade:
-                    held.add(pair)
-                    print(f"  >> BELI {pair.split('_')[0].upper()} @ {price:,.0f} "
-                          f"(skor={opp['score']:.2f} sinyal={opp['signal']:+.2f} "
-                          f"mom24h={opp['chg24h_pct']:+.1f}%)")
-
-            # ---- tampilkan papan peringkat peluang ----
-            for r in results[:5]:
-                mark = "*" if r["pair"] in broker.positions else " "
-                print(f"     {mark}{r['symbol']:<12} skor={r['score']:.2f} "
-                      f"sig={r['signal']:+.2f} m20={r['mom20']:+.2%} "
-                      f"vol24h=Rp{r['vol_idr_24h'] / 1e9:.1f}M "
-                      f"{'UPTREND' if r['uptrend'] else ''}")
-
-            # ---- evolusi mandiri berkala (backtest BTC sebagai proksi) ----
-            if time.time() - last_evolve > evolve_every * 60:
-                print("  >> AI melakukan evolusi strategi (self-improvement)...")
-                df, _ = fetch_ohlcv_or_synthetic("btc_idr", period=str(interval_min), limit=500)
-                features = normalize_signal_features(build_features(df))
-                strategies, res = evolve(strategies, df, features, brain)
-                save_portfolio(strategies)
-                scanner.strategies = strategies
-                last_evolve = time.time()
-                print(f"     hasil evolusi: return={res['return_pct']:+.2f}% "
-                      f"winrate={res['win_rate']:.0%} fitness={res['fitness']:.2f}")
-
+            try:
+                _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
+                            interval_min, deep_n, min_score, min_vol_idr,
+                            evolve_every)
+                strategies = scanner.strategies   # mungkin berubah pasca-evolusi
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                import traceback
+                print(f"[ERROR] siklus {cycle} gagal: {type(e).__name__}: {e}")
+                traceback.print_exc()
+                log_experience({"t": time.time(), "type": "cycle_error",
+                                "cycle": cycle,
+                                "error": f"{type(e).__name__}: {str(e)[:200]}"})
+                print("[ERROR] melanjutkan ke siklus berikutnya...")
             time.sleep(poll_sec)
     except KeyboardInterrupt:
         print("\nDihentikan. Menyimpan state...")
+    finally:
         save_brain(brain)
-        save_portfolio(strategies)
+        save_portfolio(scanner.strategies)
         broker.save()
 
 
+def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
+                interval_min, deep_n, min_score, min_vol_idr, evolve_every):
+    """Satu siklus penuh: sweep -> filter -> manajemen posisi -> entry -> evolusi."""
+    diag.reset()
+    diag._min_score = min_score
+    ts = time.strftime("%H:%M:%S")
+    universe, src = get_universe(min_vol_idr=min_vol_idr)
+    diag.market(len(universe), src)
+    results = scanner.scan(universe, deep_n=deep_n, diag=diag)
+    # [FILTER] gerbang skor+tren+konfirmasi kini terpadu & berlog di scanner
+    opps = opportunities(results, min_score, diag=diag)
+    for r in results:
+        if r["score"] >= min_score and r["uptrend"]:
+            diag.score_pass_one()
+
+    # harga live Indodax untuk semua pair yang relevan (posisi + kandidat)
+    pairs = {p["pair"] for p in results} | set(broker.positions)
+    prices: dict[str, float] = {}
+    for p in pairs:
+        px = broker.current_price(p)
+        if px is None:
+            r = next((x for x in results if x["pair"] == p), None)
+            px = r["last_close"] if r else None
+        if px:
+            prices[p] = px
+
+    eq = broker.equity(prices)
+    pos_txt = ", ".join(
+        f"{k.split('_')[0].upper()}({prices[k] / broker.positions[k].entry_price - 1:+.1%})"
+        if k in prices else k.split('_')[0].upper()
+        for k in broker.positions) or "-"
+    print(f"[{ts}] pasar={len(universe)} ({src}) kandidat={len(results)} "
+          f"peluang={len(opps)} ekuitas=Rp{eq:,.0f} posisi=[{pos_txt}]")
+
+    # ---- manajemen SEMUA posisi (TP/SL/trailing/sinyal) ----
+    for pair in list(broker.positions):
+        pos = broker.positions[pair]
+        price = prices.get(pair)
+        if price is None:
+            continue
+        chg = price / pos.entry_price - 1
+        peak = pos.entry_features.get("_peak_chg", 0.0)
+        if chg > peak:
+            pos.entry_features["_peak_chg"] = chg
+            peak = chg
+        reason = None
+        if chg <= -brain["stop_loss_pct"]:
+            reason = "stop_loss"
+        elif chg >= brain["take_profit_pct"]:
+            reason = "take_profit"
+        elif peak >= brain["take_profit_pct"] * 0.6 and \
+                chg < peak - max(brain["stop_loss_pct"], 0.02):
+            reason = "trailing_stop"      # kunci profit saat tren patah
+        else:
+            res = next((x for x in results if x["pair"] == pair), None)
+            sig_now = res["signal"] if res else None
+            if sig_now is None:
+                df, _ = fetch_ohlcv_or_synthetic(
+                    pair, period=str(interval_min), limit=300)
+                if df is not None and len(df) >= 60:
+                    f2 = normalize_signal_features(build_features(df))
+                    sig_now = combined_signal(strategies, f2, len(f2) - 1)
+            if sig_now is not None and sig_now < -brain["entry_threshold"] * 0.5:
+                reason = "signal_exit"
+        if reason:
+            trade = broker.sell(pair, price, reason)
+            if trade:
+                lessons = learn_from_trade(trade, strategies, brain)
+                save_brain(brain)
+                save_portfolio(strategies)
+                print(f"  >> JUAL {pair.split('_')[0].upper()} ({reason}) "
+                      f"PnL: Rp {trade['pnl']:,.0f} ({trade['pnl_pct']:+.2%})")
+                for l in lessons:
+                    print(f"     [BELAJAR] {l}")
+
+    # ---- entry: beli peluang tren naik terbaik (multi-koin) ----
+    held = set(broker.positions)
+    print(f"[ENTRY] kandidat lolos semua gerbang skor+tren+konfirmasi: {len(opps)}")
+    for opp in opps:                      # sudah terurut skor desc
+        pair = opp["pair"]
+        sym = pair.split("_")[0].upper()
+        if len(broker.positions) >= MAX_POSITIONS:
+            diag.reject(sym, "risk_management", "max_positions_reached",
+                        actual=f"{len(broker.positions)}/{MAX_POSITIONS}")
+            break
+        if pair in held:
+            continue
+        thr = min(brain["entry_threshold"], 0.15)
+        if opp["signal"] < thr:
+            # seharusnya tak terjangkau lagi (gerbang konfirmasi di
+            # opportunities memakai floor yang sama) — tetap dicatat.
+            diag.reject(sym, "strategy_confirmation",
+                        "signal_below_entry_floor",
+                        actual=f"signal={opp['signal']:+.3f}",
+                        required=f">={thr:.2f}")
+            continue      # konfirmasi arah: sinyal gabungan tidak boleh negatif kuat
+        price = prices.get(pair) or opp["last_close"]
+        feats_snap = {k: v for k, v in opp["features"].items()}
+        feats_snap["_scan_score"] = opp["score"]
+        diag.entry_ready_one()
+        trade = broker.buy(pair, price, feats_snap, alloc=brain["alloc_frac"])
+        if trade:
+            held.add(pair)
+            diag.execution(sym, True,
+                           f"@{price:,.0f} skor={opp['score']:.2f} "
+                           f"sinyal={opp['signal']:+.2f} "
+                           f"mom24h={opp['chg24h_pct']:+.1f}% qty={trade['qty']:.6g}")
+            print(f"  >> BELI {sym} @ {price:,.0f} "
+                  f"(skor={opp['score']:.2f} sinyal={opp['signal']:+.2f} "
+                  f"mom24h={opp['chg24h_pct']:+.1f}%)")
+        else:
+            diag.execution(sym, False, broker.last_reject or "unknown")
+
+    # ---- tampilkan papan peringkat peluang ----
+    for r in results[:5]:
+        mark = "*" if r["pair"] in broker.positions else " "
+        print(f"     {mark}{r['symbol']:<12} skor={r['score']:.2f} "
+              f"sig={r['signal']:+.2f} m20={r['mom20']:+.2%} "
+              f"vol24h=Rp{r['vol_idr_24h'] / 1e9:.1f}M "
+              f"{'UPTREND' if r['uptrend'] else ''}")
+
+    diag.summary(cycle, len(broker.positions), MAX_POSITIONS, broker.cash_idr)
+
+    # ---- evolusi mandiri berkala (backtest BTC sebagai proksi) ----
+    # waktu evolusi terakhir dilacak pada scanner._last_evolve agar bertahan
+    # antar-siklus tanpa mengubah perilaku asli (interval evolve_every menit).
+    if time.time() - getattr(scanner, "_last_evolve", time.time()) > evolve_every * 60:
+        print("  >> AI melakukan evolusi strategi (self-improvement)...")
+        df, _ = fetch_ohlcv_or_synthetic("btc_idr", period=str(interval_min), limit=500)
+        features = normalize_signal_features(build_features(df))
+        new_strat, res = evolve(scanner.strategies, df, features, brain)
+        save_portfolio(new_strat)
+        save_brain(brain)
+        scanner.strategies = new_strat
+        scanner._last_evolve = time.time()
+        print(f"     hasil evolusi: return={res['return_pct']:+.2f}% "
+              f"winrate={res['win_rate']:.0%} fitness={res['fitness']:.2f}")
+
+
 def do_list(deep_n: int, min_score: float, min_vol_idr: float, interval_min: int):
-    """Satu kali scan: tampilkan daftar koin dengan peluang tren naik."""
+    """Satu kali scan: tampilkan daftar koin dengan peluang tren naik.
+
+    Kini memakai gerbang terpadu yang SAMA dengan loop trading
+    (skor >= ambang + uptrend + konfirmasi sinyal strategi >= 0.15) plus
+    diagnostic logging — sehingga "PELUANG" di sini benar-benar kandidat
+    yang bisa dieksekusi, bukan hanya lolos skor aditif.
+    """
     brain = load_brain()
     strategies = load_portfolio()
     scanner = CoinScanner(strategies, brain, interval_min=interval_min)
     universe, src = get_universe(min_vol_idr=min_vol_idr)
+    diag = CycleDiag()
+    diag.reset()
+    diag._min_score = min_score
+    diag.market(len(universe), src)
     print(f"Memindai {len(universe)} pasar IDR (sumber: {src})...")
-    results = scanner.scan(universe, deep_n=deep_n)
+    results = scanner.scan(universe, deep_n=deep_n, diag=diag)
+    opps = opportunities(results, min_score, diag=diag)
+    for r in results:
+        if r["score"] >= min_score and r["uptrend"]:
+            diag.score_pass_one()
     print(f"\n{'KOIN':<12} {'SKOR':>6} {'SINYAL':>8} {'MOM24H':>8} {'MOM20B':>8} "
           f"{'VOL24H(IDR)':>14} TREN")
     print("-" * 70)
     for r in results:
-        flag = "NAIK ✓" if r["uptrend"] and r["score"] >= min_score else \
-               ("netral" if r["uptrend"] else "turun")
+        flag = "SIAP-ENTRY ✓" if any(o is r for o in opps) else \
+               ("NAIK" if r["uptrend"] and r["score"] >= min_score else
+                ("netral" if r["uptrend"] else "turun"))
         print(f"{r['symbol']:<12} {r['score']:>6.2f} {r['signal']:>+8.2f} "
               f"{r['chg24h_pct']:>7.1f}% {r['mom20']:>+7.2%} "
               f"{r['vol_idr_24h']:>14,.0f} {flag}")
-    opps = opportunities(results, min_score)
-    print(f"\n=> {len(opps)} PELUANG TREN NAIK (skor >= {min_score:.2f}): "
-          + ", ".join(o["symbol"] for o in opps))
+    print(f"\n=> {len(opps)} PELUANG SIAP-ENTRY (skor >= {min_score:.2f}, "
+          f"uptrend, DAN sinyal >= 0.15): "
+          + (", ".join(o["symbol"] for o in opps) or "(kosong)"))
+    diag.summary(1, len(opps), MAX_POSITIONS, 0.0)
 
 
 def do_status():
