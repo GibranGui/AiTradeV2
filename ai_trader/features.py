@@ -106,9 +106,17 @@ FEATURE_GROUPS = {
 
 
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Gabungkan semua grup fitur dalam satu DataFrame berindeks sama dengan df."""
-    f = pd.DataFrame(index=df.index)
-    close = df["close"]
+    """Gabungkan semua grup fitur dalam satu DataFrame berindeks integer 0..n-1.
+
+    PENTING (penyebab error CI run #38520098700): indeks hasil DIKUNCI ke
+    RangeIndex posisi, bukan mewarisi index df (yang bisa berupa timestamp).
+    Seluruh strategi mengakses kolom sebagai Series dengan `f[col][i]`
+    (integer = POSISI bar). Bila index warisan DatetimeIndex, pandas >=2 memperlakukan
+    kunci integer sebagai LABEL -> KeyError / salah baca. reset_index() membuat kode
+    kebal terhadap versi pandas & jenis index sumber data. Perilaku numerik tidak berubah.
+    """
+    f = pd.DataFrame(index=pd.RangeIndex(len(df)))
+    close = df["close"].reset_index(drop=True)
 
     f["rsi"] = rsi(close) / 50 - 1                      # -1..1 ter-normalisasi
     line, sig, hist = macd(close)

@@ -1,3 +1,5 @@
 requests>=2.31
-pandas>=2.0
+# pin <3: strategi mengakses Series dengan kunci integer-posisi; pandas 3.x
+# mengubah perilaku indexing label vs posisi (risiko KeyError salah baca).
+pandas>=2.0,<3
 numpy>=1.24
