@@ -15,6 +15,17 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - name: Unit & integration tests (pipeline audit AiTradeV2)
+        run: |
+          pip install pytest
+          python -m pytest tests/ -q -p no:libtmux \
+            --junitxml=data/reports/junit.xml
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-test-report
+          path: data/reports/junit.xml
       - name: Evolusi singkat (data historis Indodax / fallback sintetis)
         run: python -m ai_trader.main evolve --pair IDRBTC --interval 60
       - name: Status
