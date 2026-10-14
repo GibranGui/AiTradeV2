@@ -42,7 +42,11 @@ permissions:
 
 concurrency:
   group: paper-trader
-  cancel-in-progress: true
+  # PENTING (perbaikan run #38519257448 dst): dulu `true` -> setiap dispatch
+  # baru MEMBATALKAN run yang hampir selesai, sehingga langkah "Simpan state"
+  # tidak pernah jalan dan snapshot bot-state hilang. Dengan `false`, run
+  # berjalan sampai tuntas; run berlebih mengantri lalu digabung (max 1 antrian).
+  cancel-in-progress: false
 
 jobs:
   run-bot:
@@ -152,6 +156,14 @@ jobs:
           #    BOT_PAT yang disimpan di file, JANGAN lewat argumen ps.
           # 2) tick Watchdog via repository_dispatch (client_payload harus
           #    objek JSON asli; -F string dari gh ditolak 422).
+          # ── RANTAI LOOP OTOMATIS (disederhanakan — 1 dispatch per siklus) ──
+          # Masalah lama: Paper Trader mengirim DUA pemicu sekaligus (self-
+          # dispatch workflow_dispatch + tick watchdog -> dispatch kedua).
+          # Dengan cancel-in-progress:true, run yang hampir selesai dibatalkan
+          # sebelum sempat menyimpan state (snapshot bot-state hilang).
+          # Sekarang: HANYA satu mekanisme rantai — self-dispatch via BOT_PAT.
+          # Watchdog tidak lagi dispatch untuk tick 'self-loop' (lihat
+          # watchdog.yml); ia hanya penjaga pemantik jika rantai putus.
           printf '{"ref":"main","inputs":{"pair":"scan","interval":"60","poll":"30","evolve_every":"30"}}' > /tmp/pt.json
           if [ -n "${{ secrets.BOT_PAT }}" ]; then
             curl -sf -X POST \
@@ -162,14 +174,8 @@ jobs:
               && echo "✅ Rantai berlanjut: Paper Trader di-dispatch ulang oleh dirinya sendiri." \
               || echo "⚠️ Self-dispatch gagal — rantai akan disambung Watchdog/tick eksternal."
           else
-            echo "ℹ️ Secrets BOT_PAT belum diisi — self-dispat dilewati (isi di repo Settings > Secrets)."
+            echo "ℹ️ Secrets BOT_PAT belum diisi — self-dispatch dilewati; rantai dijaga tick eksternal/watchdog push."
           fi
-          printf '{"event_type":"watchdog-tick","client_payload":{"source":"self-loop"}}' > /tmp/wd.json
-          curl -s -o /dev/null -X POST \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            --data @/tmp/wd.json \
-            "https://api.github.com/repos/${{ github.repository }}/dispatches" || true
 
       - name: Publikasikan dashboard ke GitHub Pages (branch gh-pages)
         if: always()

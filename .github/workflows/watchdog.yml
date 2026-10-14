@@ -35,13 +35,14 @@ jobs:
           set -e
           NOW=$(date -u +%s)
           SRC="${{ github.event.client_payload.source }}"
-          # Tick dari loop internal (akhir siklus Paper Trader): selalu dispatch,
-          # tanpa cek umur — inilah yang membuat rantai jalan nonstop.
+          # RANTAI BARU (perbaikan double-dispatch): Paper Trader kini HANYA
+          # self-dispatch via BOT_PAT di akhir siklus — tidak mengirim tick
+          # 'self-loop' lagi. Jika tick berlabel self-loop masih datang
+          # (mis. run lama yang tersisa di antrian), abaikan agar tidak ada
+          # dispatch ganda; Watchdog murni penjaga: dispatch hanya bila rantai
+          # putus (run Paper Trader terakhir berumur >= 25 menit).
           if [ "$SRC" = "self-loop" ]; then
-            gh api -X POST "repos/${{ github.repository }}/actions/workflows/paper-trader.yml/dispatches" \
-              -f ref=main -f 'inputs[pair]=scan' -f 'inputs[interval]=60' \
-              -f 'inputs[poll]=30' -f 'inputs[evolve_every]=30'
-            echo "✅ Dispatch langsung (tick self-loop, rantai berlanjut)."
+            echo "Tick self-loop diabaikan (rantai kini lewat self-dispatch BOT_PAT langsung)."
             exit 0
           fi
           # Tick EKSTERNAL (cronjob.org dsb): periksa umur run terakhir; dispatch

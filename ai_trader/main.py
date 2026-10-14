@@ -195,9 +195,11 @@ def run_scan_loop(interval_min: int, poll_sec: int, evolve_every: int,
 
     cycle = 0
     diag = CycleDiag()
+    had_error = False          # siklus terakhir gagal? (untuk grace period)
     try:
         while time.time() < _deadline:
             cycle += 1
+            had_error = False
             try:
                 _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
                             interval_min, deep_n, min_score, min_vol_idr,
@@ -207,12 +209,25 @@ def run_scan_loop(interval_min: int, poll_sec: int, evolve_every: int,
                 raise
             except Exception as e:
                 import traceback
+                had_error = True
                 print(f"[ERROR] siklus {cycle} gagal: {type(e).__name__}: {e}")
                 traceback.print_exc()
                 log_experience({"t": time.time(), "type": "cycle_error",
                                 "cycle": cycle,
                                 "error": f"{type(e).__name__}: {str(e)[:200]}"})
                 print("[ERROR] melanjutkan ke siklus berikutnya...")
+            # Jeda adaptif + cek deadline SEBELUM tidur — mencegah run baru
+            # dibatalkan (cancel-in-progress) saat hampir selesai, yang dulu
+            # membuat snapshot state hilang & loop berkejaran dengan runner.
+            # Grace period 15s: jika siklus gagal, beri kesempatan minimal satu
+            # siklus perbaikan sebelum berhenti (penting untuk CI).
+            now = time.time()
+            remaining = _deadline - now
+            grace = 15 if had_error else 0
+            if remaining <= poll_sec + 60 - grace:
+                print(f"[LOOP] mendekati batas waktu ({remaining:.0f}s tersisa)"
+                      " — berhenti rapi agar state tersimpan.")
+                break
             time.sleep(poll_sec)
     except KeyboardInterrupt:
         print("\nDihentikan. Menyimpan state...")
