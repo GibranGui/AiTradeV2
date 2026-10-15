@@ -3,135 +3,207 @@
     "name": "rsi_reversal",
     "group": "indicator",
     "params": {
-      "overbought": 77.636,
+      "overbought": 67.285,
       "oversold": 30.658
     },
     "signal_fn_name": "sig_rsi_cross",
-    "weight": 1.3260461547599154,
-    "fitness": 35.958,
+    "weight": 1.989351243690023,
+    "fitness": 36.338,
     "wins": 0,
-    "losses": 0
+    "losses": 0,
+    "entry_thr": 0.308,
+    "score_min": 0.374,
+    "signal_floor": 0.075,
+    "scalp_strong": 0.111,
+    "scalp_floor": 0.083
   },
   {
     "name": "macd_momentum",
     "group": "indicator",
     "params": {
-      "sensitivity": 11.894
+      "sensitivity": 14.912
     },
     "signal_fn_name": "sig_macd_momentum",
-    "weight": 0.6693843632844794,
-    "fitness": 35.958,
+    "weight": 0.9888101871267186,
+    "fitness": 36.338,
     "wins": 0,
-    "losses": 0
+    "losses": 0,
+    "entry_thr": 0.263,
+    "score_min": 0.541,
+    "signal_floor": 0.064,
+    "scalp_strong": 0.163,
+    "scalp_floor": 0.066
   },
   {
     "name": "ema_trend",
     "group": "indicator",
     "params": {
-      "sensitivity": 9.49
+      "sensitivity": 10.955
     },
     "signal_fn_name": "sig_ema_trend",
-    "weight": 1.0233329942065092,
-    "fitness": 35.958,
+    "weight": 0.9612671608885796,
+    "fitness": 36.338,
     "wins": 0,
-    "losses": 0
+    "losses": 0,
+    "entry_thr": 0.195,
+    "score_min": 0.598,
+    "signal_floor": 0.071,
+    "scalp_strong": 0.16,
+    "scalp_floor": 0.073
   },
   {
     "name": "bollinger_reversion",
     "group": "indicator",
     "params": {
-      "band": 1.057
+      "band": 0.946
     },
     "signal_fn_name": "sig_bollinger_reversion",
-    "weight": 1.4718719175652053,
-    "fitness": 35.958,
+    "weight": 1.5552160506277397,
+    "fitness": 36.338,
     "wins": 0,
-    "losses": 0
+    "losses": 0,
+    "entry_thr": 0.285,
+    "score_min": 0.62,
+    "signal_floor": 0.091,
+    "scalp_strong": 0.272,
+    "scalp_floor": 0.055
   },
   {
     "name": "stochastic_os",
     "group": "indicator",
     "params": {
       "overbought": 90.0,
-      "oversold": 22.612
+      "oversold": 23.434
     },
     "signal_fn_name": "sig_stochastic",
-    "weight": 1.443324788153744,
-    "fitness": 35.958,
+    "weight": 1.2464453300584426,
+    "fitness": 36.338,
     "wins": 0,
-    "losses": 0
+    "losses": 0,
+    "entry_thr": 0.182,
+    "score_min": 0.407,
+    "signal_floor": 0.069,
+    "scalp_strong": 0.306,
+    "scalp_floor": 0.058
   },
   {
     "name": "donchian_breakout",
     "group": "indicator",
     "params": {
-      "lookback": 24.754,
-      "vol_confirm": 1.738
+      "lookback": 16.982,
+      "vol_confirm": 2.349
     },
     "signal_fn_name": "sig_breakout",
-    "weight": 1.1507503806925927,
-    "fitness": 35.958,
+    "weight": 1.3960822329091525,
+    "fitness": 36.338,
     "wins": 0,
-    "losses": 0
+    "losses": 0,
+    "entry_thr": 0.236,
+    "score_min": 0.408,
+    "signal_floor": 0.071,
+    "scalp_strong": 0.245,
+    "scalp_floor": 0.063
   },
   {
     "name": "ma_cross_trend",
     "group": "indicator",
     "params": {
-      "sensitivity": 391.714
+      "sensitivity": 343.416
     },
     "signal_fn_name": "sig_ma_cross",
-    "weight": 0.9946333057544098,
-    "fitness": 35.958,
+    "weight": 0.8661367264268409,
+    "fitness": 36.338,
     "wins": 0,
-    "losses": 0
+    "losses": 0,
+    "entry_thr": 0.146,
+    "score_min": 0.358,
+    "signal_floor": 0.073,
+    "scalp_strong": 0.124,
+    "scalp_floor": 0.122
   },
   {
     "name": "candle_reversal",
     "group": "candle",
     "params": {
-      "strength": 0.564
+      "strength": 0.344
     },
     "signal_fn_name": "sig_candle_reversal",
-    "weight": 0.8412845444208511,
-    "fitness": 35.958,
+    "weight": 1.2761040997531803,
+    "fitness": 36.338,
     "wins": 0,
-    "losses": 0
+    "losses": 0,
+    "entry_thr": 0.281,
+    "score_min": 0.45,
+    "signal_floor": 0.081,
+    "scalp_strong": 0.22,
+    "scalp_floor": 0.076
   },
   {
     "name": "volume_spike",
     "group": "volume",
     "params": {
-      "spike": 1.828
+      "spike": 1.73
     },
     "signal_fn_name": "sig_volume_confirmation",
-    "weight": 1.0394237879643242,
-    "fitness": 35.958,
+    "weight": 1.772835532850474,
+    "fitness": 36.338,
     "wins": 0,
-    "losses": 0
+    "losses": 0,
+    "entry_thr": 0.355,
+    "score_min": 0.353,
+    "signal_floor": 0.094,
+    "scalp_strong": 0.211,
+    "scalp_floor": 0.059
   },
   {
     "name": "vwap_reversion",
     "group": "volume",
     "params": {
-      "sensitivity": 2.288
+      "sensitivity": 2.386
     },
     "signal_fn_name": "sig_vwap_deviation",
-    "weight": 1.186194675051071,
-    "fitness": 35.958,
+    "weight": 1.6432952979622775,
+    "fitness": 36.338,
     "wins": 0,
-    "losses": 0
+    "losses": 0,
+    "entry_thr": 0.171,
+    "score_min": 0.556,
+    "signal_floor": 0.055,
+    "scalp_strong": 0.162,
+    "scalp_floor": 0.082
   },
   {
     "name": "volume_spike_v774",
     "group": "volume",
     "params": {
-      "spike": 1.638
+      "spike": 1.197
     },
     "signal_fn_name": "sig_volume_confirmation",
-    "weight": 0.4950833004740475,
-    "fitness": 35.958,
+    "weight": 0.31325808446746495,
+    "fitness": 36.338,
     "wins": 0,
-    "losses": 0
+    "losses": 0,
+    "entry_thr": 0.177,
+    "score_min": 0.45,
+    "signal_floor": 0.135,
+    "scalp_strong": 0.145,
+    "scalp_floor": 0.065
+  },
+  {
+    "name": "volume_spike_v774_v291",
+    "group": "volume",
+    "params": {
+      "spike": 1.1
+    },
+    "signal_fn_name": "sig_volume_confirmation",
+    "weight": 0.47548372190874333,
+    "fitness": 36.338,
+    "wins": 0,
+    "losses": 0,
+    "entry_thr": 0.166,
+    "score_min": 0.35,
+    "signal_floor": 0.105,
+    "scalp_strong": 0.246,
+    "scalp_floor": 0.044
   }
 ]

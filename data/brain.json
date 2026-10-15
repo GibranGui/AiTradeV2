@@ -1,9 +1,13 @@
 {
-  "entry_threshold": 0.25,
+  "entry_threshold": 0.217,
   "stop_loss_pct": 0.02,
   "take_profit_pct": 0.035,
   "alloc_frac": 0.5,
   "lr": 0.1,
   "total_wins": 0,
-  "total_losses": 0
+  "total_losses": 0,
+  "score_min": 0.45,
+  "signal_floor": 0.08,
+  "scalp_strong": 0.15,
+  "scalp_floor": 0.06
 }
