@@ -495,20 +495,37 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
     # antar-siklus tanpa mengubah perilaku asli (interval evolve_every menit).
     if time.time() - getattr(scanner, "_last_evolve", time.time()) > evolve_every * 60:
         print("  >> AI melakukan evolusi strategi (self-improvement)...")
-        # multi-koin: BTC + ETH sebagai proksi pasar; varian nol-trade dihukum
-        # di fitness sehingga AI belajar memilih ambang yang BERANI entry.
+        # multi-koin: BTC + ETH sebagai proksi pasar. FIX AUDIT FASE 4: dulu
+        # kedua frame di-concat TANPA penyelarasan waktu menjadi SATU deret
+        # harga — menghasilkan lonjakan palsu di sambungan (bukti repro: +2,7%)
+        # yang mencemari semua fitur rolling & backtest. Sekarang tiap aset
+        # dievolusikan pada DERET-NYA SENDIRI (walk-forward train/OOS internal),
+        # lalu kandidat terbaik dipilih lewat penjumlahan fitness antar-aset —
+        # tidak ada satu pun urutan harga campur-adukan.
         import pandas as pd
         frames = []
         for p in ("btc_idr", "eth_idr"):
             d, live = fetch_ohlcv_or_synthetic(p, period=str(interval_min), limit=500)
             if d is not None and len(d) >= 120 and live:
-                frames.append(d.reset_index(drop=True))
+                frames.append((p, d.reset_index(drop=True)))
         if not frames:
-            df, _ = fetch_ohlcv_or_synthetic("btc_idr", period=str(interval_min), limit=500)
-            frames = [df.reset_index(drop=True)]
-        df = pd.concat(frames, ignore_index=True)
-        features = normalize_signal_features(build_features(df))
-        new_strat, res = evolve(scanner.strategies, df, features, brain)
+            df0, _ = fetch_ohlcv_or_synthetic("btc_idr", period=str(interval_min), limit=500)
+            frames = [("btc_idr", df0.reset_index(drop=True))]
+        new_strat, res = scanner.strategies, None
+        agg = {}
+        for name, dframe in frames:
+            feats = normalize_signal_features(build_features(dframe))
+            cand, r = evolve(scanner.strategies, dframe, feats, brain)
+            # kumpulkan metrik per aset untuk laporan jujur
+            agg[name] = {k: r.get(k) for k in
+                         ("return_pct", "trades", "max_dd_pct", "fitness",
+                          "accepted", "oos_return_pct", "oos_trades")}
+            if res is None or (r.get("accepted") and r["fitness"] > res.get("fitness", -1e9)):
+                new_strat, res = cand, r
+        if res is None:
+            res = {"fitness": float("nan"), "return_pct": float("nan"),
+                   "win_rate": 0.0, "trades": 0}
+        res["per_asset"] = agg
         save_portfolio(new_strat)
         save_brain(brain)
         scanner.strategies = new_strat
@@ -519,7 +536,9 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
         print(f"     hasil evolusi: return={res['return_pct']:+.2f}% "
               f"winrate={res['win_rate']:.0%} trades_bt={res.get('trades', 0)} "
               f"thr_belajar={res.get('entry_thr_used', float('nan')):.2f} "
-              f"fitness={res['fitness']:.2f}")
+              f"fitness={res['fitness']:.2f} accepted={res.get('accepted')} "
+              f"oos_ret={res.get('oos_return_pct', float('nan')):+.2f}% "
+              f"per-aset={ {k: round(v['return_pct'], 2) for k, v in agg.items() if v.get('return_pct') is not None} }")
 
 
 def do_list(deep_n: int, min_score: float, min_vol_idr: float, interval_min: int):

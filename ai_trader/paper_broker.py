@@ -78,6 +78,14 @@ class PaperBroker:
                 pass
 
     def save(self):
+        """Tulis ATOMIK (tmp + fsync + rename).
+
+        FIX audit Fase 6: penulisan langsung ke file tujuan dapat menghasilkan
+        JSON parsial bila proses mati di tengah tulis (CI timeout / pembatalan
+        run) — _load lalu gagal parse dan DOMPET KEMBALI KE AWAL (posisi & kas
+        hilang senyap). Rename POSIX bersifat atomik: pembaca tidak pernah
+        melihat file setengah tertulis.
+        """
         os.makedirs(os.path.dirname(self.wallet_path), exist_ok=True)
         w = {
             "cash_idr": self.cash_idr,
@@ -85,8 +93,12 @@ class PaperBroker:
             "position": None,                              # field warisan (deprecated)
             "trades": self.trades[-500:],
         }
-        with open(self.wallet_path, "w") as f:
+        tmp = self.wallet_path + ".tmp"
+        with open(tmp, "w") as f:
             json.dump(w, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, self.wallet_path)
 
     # ---------- harga ----------
     def current_price(self, pair: str) -> float | None:

@@ -13,6 +13,7 @@ Dua mekanisme belajar:
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import time
@@ -52,10 +53,20 @@ def load_brain() -> dict:
     return sync_brain(dict(DEFAULT_BRAIN))
 
 
+def _atomic_write(path: str, obj) -> None:
+    """Tulis atomik (tmp + fsync + rename) — mencegah JSON parsial bila
+    proses mati di tengah tulis; pembaca tidak pernah melihat file setengah."""
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(obj, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
 def save_brain(brain: dict):
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(BRAIN_PATH, "w") as f:
-        json.dump(brain, f, indent=2)
+    _atomic_write(BRAIN_PATH, brain)
 
 
 def log_experience(entry: dict):
@@ -217,21 +228,35 @@ def learn_from_trade(trade: dict, strategies: list[Strategy], brain: dict) -> li
 # ================= 2. BACKTEST EVOLUSIONER (offline learning) =================
 
 def run_backtest(strategies: list[Strategy], df, features, brain: dict,
-                 fee: float = 0.003) -> dict:
-    """Backtest walk-forward sederhana pada DataFrame OHLCV + fitur.
+                 fee: float = 0.003, slippage: float = 0.0005) -> dict:
+    """Backtest walk-forward REALISTIS pada DataFrame OHLCV + fitur.
 
     Urutan argumen disamakan dengan combined_signal(strategies, features, i):
     (strategies, df, features, brain).
+
+    FIX AUDIT FASE 3 (tiga bug terbukti oleh repro terminal):
+    1. LOOK-AHEAD ENTRY: dulu order dieksekusi di close[i] — harga yang sama
+       yang dipakai menghitung sinyal bar i, padahal close baru diketahui
+       SETELAH bar selesai. Sekarang: sinyal bar i -> eksekusi OPEN bar i+1.
+    2. EXIT TIDAK KONSISTEN DENGAN LIVE: dulu exit hanya dicek pada close,
+       padahal live memakai ticker intrabar (exit terjadi saat harga MENYENTUH
+       level). Bukti repro: 17/200 event SL tersentuh-intrabar tak tereksekusi.
+       Sekarang TP/SL/trailing dievaluasi INTRABAR via high/low; bila TP dan SL
+       tersentuh pada bar yang sama (urutan tak mungkin diketahui dari OHLCV),
+       aturan KONSERVATIF memilih kerugian (SL menang) — bukan klaim tahu urutan.
+    3. TRAILING STOP HILANG: kini diperhitungkan (peak berjalan sejak entry),
+       konsisten dengan jalur tren live. Exit sinyal memakai ambang TETAP
+       SIGNAL_EXIT_FLOOR pada close-bar (sama seperti live) — tidak ikut
+       threshold entry (konsistensi Fase 1 P1).
+    Biaya dua sisi + slippage kecil dihitung pada kedua arah.
 
     Threshold entry yang dipakai = rata-rata gerbang adaptif portofolio
     (portfolio_gates), BUKAN angka template — sehingga evolusi bisa belajar
     "berapa ambang yang tepat" bersamaan dengan bobot & parameter strategi.
     """
     from .gates import ENTRY_THR_MIN, ENTRY_THR_MAX   # lokal: hindari siklus impor
+    SIGNAL_EXIT_FLOOR = 0.10                          # sama dgn main.py (live)
     n = len(df)
-    # Akuntansi equity-based: eq = kas + nilai pasar posisi. Pembelian memakai
-    # fraksi tetap dari EKUITAS (bukan seluruh sisa kas) sehingga tidak ada
-    # "uang hantu" yang membuat return backtest membengkak secara artifisial.
     cash, pos_qty, entry_px = 1.0, 0.0, 0.0
     eq_curve, trades = [], []
     thr = float(np.clip(portfolio_gates(strategies)["entry_thr"],
@@ -239,40 +264,77 @@ def run_backtest(strategies: list[Strategy], df, features, brain: dict,
     sl, tp = brain["stop_loss_pct"], brain["take_profit_pct"]
     alloc = float(brain.get("alloc_frac", 0.5))
     close = df["close"].values
+    open_ = df["open"].values
+    high = df["high"].values
+    low = df["low"].values
     atr_series = features["atr_raw"] if "atr_raw" in features else None
     med_atr = float(np.median(atr_series[atr_series > 0])) if atr_series is not None else None
 
+    pending_entry = False          # sinyal bar i -> beli open bar i+1
+    peak_chg = 0.0
+
+    def _exit(px_exit: float, reason: str, i_: int):
+        nonlocal cash, pos_qty, entry_px, peak_chg
+        px_eff = px_exit * (1 - slippage)
+        cash += pos_qty * px_eff * (1 - fee)
+        trades.append({"pnl_pct": px_eff / entry_px - 1 - 2 * fee, "reason": reason})
+        pos_qty, entry_px, peak_chg = 0.0, 0.0, 0.0
+
     for i in range(2, n):
         px = close[i]
+        # ---- EXIT intrabar pada bar i (bar setelah entry maupun berikutnya) ----
         if pos_qty > 0:
-            chg = px / entry_px - 1
-            sig = combined_signal(strategies, features, i)
             if med_atr and entry_px > 0:
                 scale = float(np.clip(atr_series[i] / med_atr, 0.5, 3.0))
             else:
                 scale = 1.0
-            exit_reason = None
-            if chg <= -sl * scale:
-                exit_reason = "stop_loss"
-            elif chg >= tp * scale:
-                exit_reason = "take_profit"
-            elif sig < -thr * 0.5:
-                exit_reason = "signal_exit"
-            if exit_reason:
-                cash += pos_qty * px * (1 - fee)
-                trades.append({"pnl_pct": chg - 2 * fee, "reason": exit_reason})
-                pos_qty = 0.0
-        else:
+            sl_lvl, tp_lvl = sl * scale, tp * scale
+            hi_chg = high[i] / entry_px - 1
+            lo_chg = low[i] / entry_px - 1
+            tp_hit, sl_hit = hi_chg >= tp_lvl, lo_chg <= -sl_lvl
+            if tp_hit and sl_hit:
+                # urutan intrabar TAKSIRAN-TERBATAS dari OHLCV -> konservatif:
+                # anggap kerugian lebih dulu menyentuh (SL menang). Jangan pernah
+                # mengklaim tahu urutan sebenarnya.
+                _exit(entry_px * (1 - sl_lvl), "stop_loss", i)
+            elif sl_hit:
+                _exit(entry_px * (1 - sl_lvl), "stop_loss", i)
+            elif tp_hit:
+                _exit(entry_px * (1 + tp_lvl), "take_profit", i)
+            else:
+                # trailing (konsisten live): kunci profit setelah peak >= 60% TP
+                new_peak = max(peak_chg, hi_chg)
+                trail_sl = max(sl, 0.02)
+                if peak_chg >= tp_lvl * 0.6 and lo_chg < new_peak - trail_sl:
+                    _exit(entry_px * (1 + new_peak - trail_sl), "trailing_stop", i)
+                else:
+                    peak_chg = new_peak
+                    sig = combined_signal(strategies, features, i)
+                    if sig < -SIGNAL_EXIT_FLOOR:      # exit-sinyal pada close-bar
+                        _exit(px, "signal_exit", i)
+        # ---- ENTRY tertunda: sinyal bar i-1 dieksekusi di open bar i ----
+        if pos_qty == 0 and pending_entry:
+            ep = open_[i] * (1 + slippage)
+            eq = cash + pos_qty * px
+            spend = min(cash, max(0.0, eq * alloc))
+            if spend > 1e-9:
+                pos_qty = spend * (1 - fee) / ep
+                cash -= spend
+                entry_px = ep
+                peak_chg = 0.0
+        pending_entry = False
+        if pos_qty == 0:
             sig = combined_signal(strategies, features, i)
             if sig > thr:
-                eq = cash + pos_qty * px
-                spend = min(cash, max(0.0, eq * alloc))
-                if spend > 1e-9:
-                    pos_qty = spend * (1 - fee) / px
-                    cash -= spend
-                    entry_px = px
+                pending_entry = True     # keputusan malam -> esok pagi (open)
         eq = cash + (pos_qty * px if pos_qty else 0.0)
         eq_curve.append(eq)
+
+    # posisi terbuka di akhir backtest ditutup pada close terakhir (mark-to-market
+    # jujur, bukan dibiarkan menguap dari kurva)
+    if pos_qty > 0:
+        _exit(float(close[-1]), "end_of_test", n - 1)
+        eq_curve[-1] = cash
 
     wins = [t for t in trades if t["pnl_pct"] > 0]
     losses = [t for t in trades if t["pnl_pct"] <= 0]
@@ -302,40 +364,86 @@ def run_backtest(strategies: list[Strategy], df, features, brain: dict,
 
 def evolve(strategies: list[Strategy], df, features, brain: dict,
            generations: int = 6, pop: int = 4) -> tuple[list[Strategy], dict]:
-    """Evolusi portofolio: uji varian bermutasi, pertahankan yang terbaik.
+    """Evolusi portofolio dengan pemisahan TRAIN/VALIDASI berdasarkan WAKTU.
 
-    Ini adalah cara AI 'menulis ulang strateginya sendiri' — ia menghasilkan
-    kandidat parameter baru, mengukur kesalahannya lewat backtest, dan hanya
-    menyimpan kode konfigurasi yang lebih baik.
+    FIX AUDIT FASE 4 (overfitting & seleksi tanpa OOS):
+    * Data dipecah temporal: 70% pertama = training (mutasi & seleksi),
+      30% terakhir = out-of-sample VALIDASI yang TIDAK PERNAH dilihat selama
+      seleksi. Kandidat terbaik dipilih di train, lalu HARUS membuktikan diri
+      di validasi sebelum diterapkan.
+    * Validasi gagal (return-OOS lebih buruk dari baseline > toleransi, atau
+      nol trade) -> strategi lama DIPERTAHANKAN; parameter hasil evolusi tidak
+      diterapkan agresif (aturan "jangan ganti hanya karena fitness naik
+      sedikit" kini ditegakkan lewat margin).
+    * Perbaikan crash terbukti: `brain["entry_threshold"]` diakses tanpa guard
+      saat best_res tidak memuat 'entry_thr_used' -> KeyError (repro terminal).
     """
+    n = len(df)
+    split = max(120, int(n * 0.7)) if n >= 180 else n     # tanpa split bila data pendek
+    if split < n:
+        tr_df = df.iloc[:split].reset_index(drop=True)
+        va_df = df.iloc[split - 60:].reset_index(drop=True)   # overlap 60 bar: warm-start fitur
+        try:
+            tr_feat = features.iloc[:split].reset_index(drop=True)
+            va_feat = features.iloc[split - 60:].reset_index(drop=True)
+        except Exception:
+            tr_feat, va_feat = features, features
+    else:
+        tr_df, va_df = df, None
+        tr_feat = va_feat = features
+
+    def _bt(strat, d, f):
+        return run_backtest(strat, d, f, brain)
+
     best = strategies
     gates_before = portfolio_gates(best)
-    best_res = run_backtest(best, df, features, brain)
+    best_res = _bt(best, tr_df, tr_feat)
+    base_val = _bt(copy.deepcopy(best), va_df, va_feat) if va_df is not None else best_res
     history = [best_res]
 
     for gen in range(generations):
         candidates = [mutate(best, rate=0.35) for _ in range(pop)]
         for cand in candidates:
-            res = run_backtest(cand, df, features, brain)
+            res = _bt(cand, tr_df, tr_feat)
             history.append(res)
             if res["fitness"] > best_res["fitness"]:
                 best, best_res = cand, res
-        # setiap generasi, beri peluang mutasi liar (exploration)
         if np.random.random() < 0.3:
             wild = mutate(best, rate=0.6)
-            res = run_backtest(wild, df, features, brain)
+            res = _bt(wild, tr_df, tr_feat)
             if res["fitness"] > best_res["fitness"]:
                 best, best_res = wild, res
 
-    # catat fitness per strategi dari kontribusi backtest terakhir
+    # ---- MARGIN penerimaan: peningkatan fitness harus MELEBIHI ambang noise
+    # (bukan sekadar >) — mencegah strategi diganti karena fluktuasi kecil.
+    FITNESS_MARGIN = 0.5
+    accepted = best_res["fitness"] >= _bt(strategies, tr_df, tr_feat)["fitness"] + FITNESS_MARGIN
+
+    # ---- VALIDASI OUT-OF-SAMPLE: kandidat juara diuji pada data masa depan
+    # yang tidak pernah dilihat seleksi. Gagal -> rollback penuh ke seed.
+    val_res = None
+    if va_df is not None and accepted:
+        val_res = _bt(copy.deepcopy(best), va_df, va_feat)
+        val_ok = (val_res["trades"] > 0
+                  and val_res["return_pct"] >= base_val["return_pct"] - 1.0
+                  and val_res["max_dd_pct"] <= max(base_val["max_dd_pct"] + 5.0, 15.0))
+        if not val_ok:
+            log_experience({"t": time.time(), "type": "evolve_rejected_oos",
+                            "train_fitness": best_res["fitness"],
+                            "oos": {k: round(float(val_res[k]), 3)
+                                    for k in ("return_pct", "trades", "max_dd_pct")}})
+            best, best_res, accepted = strategies, best_res, False
+            val_res = {"rejected": True, **{k: round(float(val_res[k]), 3) for k in
+                                            ("return_pct", "trades", "max_dd_pct")}}
+
+    # catat fitness per strategi dari backtest terakhir yang DITERIMA
     for s in best:
         s.fitness = round(best_res["fitness"], 3)
 
     # ---- sinkronisasi dua arah antara otak & gerbang portofolio ----
-    # Ambang hasil evolusi (portfolio_gates) dipromosikan ke brain sebagai
-    # ambang aktif bot; brain yang lebih berani juga menular ke strategi
-    # baru agar benih awal tidak terlalu ketat.
-    evolved_thr = float(best_res.get("entry_thr_used", brain["entry_threshold"]))
+    evolved_thr = float(best_res.get("entry_thr_used",
+                                     brain.get("entry_threshold", ENTRY_THR_MIN)))
+    brain.setdefault("entry_threshold", evolved_thr)
     brain["entry_threshold"] = round(float(np.clip(
         min(evolved_thr, max(brain["entry_threshold"], ENTRY_THR_MIN)),
         ENTRY_THR_MIN, ENTRY_THR_MAX)), 3)
@@ -344,11 +452,19 @@ def evolve(strategies: list[Strategy], df, features, brain: dict,
         brain["entry_threshold"] = round(g["entry_thr"], 3)
 
     log_experience({"t": time.time(), "type": "evolve", "result": best_res,
-                    "generations": generations,
+                    "generations": generations, "accepted": accepted,
+                    "train_split": split, "oos_validation": val_res,
                     "gates_before": gates_before,
                     "gates_after": {k: getattr(best[0], k) for k in
                                     ("entry_thr", "score_min", "signal_floor",
                                      "scalp_strong", "scalp_floor")}
                     if best else {},
                     "brain_entry_threshold": brain["entry_threshold"]})
-    return best, best_res
+    # laporkan hasil VALIDASI bila ada (jujur: angka yang dipakai untuk promosi)
+    report = dict(best_res)
+    if val_res is not None and not val_res.get("rejected"):
+        report.update({"oos_return_pct": val_res["return_pct"],
+                       "oos_trades": val_res["trades"],
+                       "oos_max_dd_pct": val_res["max_dd_pct"]})
+    report["accepted"] = accepted
+    return best, report

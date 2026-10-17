@@ -201,9 +201,14 @@ STATE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "strategies.j
 
 
 def save_portfolio(strategies: list[Strategy], path: str = STATE_PATH):
+    """Tulis atomik (tmp + fsync + rename) — lihat catatan audit Fase 6."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as fp:
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fp:
         json.dump([s.to_dict() for s in strategies], fp, indent=2)
+        fp.flush()
+        os.fsync(fp.fileno())
+    os.replace(tmp, path)
 
 
 def load_portfolio(path: str = STATE_PATH) -> list[Strategy]:

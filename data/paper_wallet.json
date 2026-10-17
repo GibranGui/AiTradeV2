@@ -1,5 +1,5 @@
 {
-  "cash_idr": 10181860.89590027,
+  "cash_idr": 10260810.248111771,
   "positions": [],
   "position": null,
   "trades": [
@@ -366,6 +366,162 @@
         "_scalp": true
       },
       "holding_sec": 0.0008904933929443359
+    },
+    {
+      "action": "BUY",
+      "pair": "sol_idr",
+      "price": 2000000,
+      "qty": 1.015131531321257,
+      "fee_idr": 6109.116537540162,
+      "time": 1792250558.7317452,
+      "pnl": null
+    },
+    {
+      "action": "SELL",
+      "pair": "sol_idr",
+      "price": 2024000.0,
+      "qty": 1.015131531321257,
+      "fee_idr": 6163.878658182673,
+      "time": 1792250558.7326355,
+      "pnl": 18199.278093527537,
+      "pnl_pct": 0.0060000000000000105,
+      "reason": "scalp_take_profit",
+      "entry_features": {
+        "_scalp": true,
+        "_scalp_atr_pct": 0.005,
+        "rsi": 0.1,
+        "macd_hist": 0.2,
+        "ema_trend": 0.3
+      },
+      "holding_sec": 0.0008909702301025391
+    },
+    {
+      "action": "BUY",
+      "pair": "eth_idr",
+      "price": 50000,
+      "qty": 20.326738408567774,
+      "fee_idr": 3058.185317236877,
+      "time": 1792250558.7353837,
+      "pnl": null
+    },
+    {
+      "action": "SELL",
+      "pair": "eth_idr",
+      "price": 51000,
+      "qty": 20.326738408567774,
+      "fee_idr": 3109.9909765108696,
+      "time": 1792250558.73616,
+      "pnl": 17216.747432056814,
+      "pnl_pct": 0.014000000000000018,
+      "reason": "scalp_take_profit",
+      "entry_features": {
+        "_scalp": true
+      },
+      "holding_sec": 0.0007765293121337891
+    },
+    {
+      "action": "BUY",
+      "pair": "sol_idr",
+      "price": 2000000,
+      "qty": 1.0177485290712363,
+      "fee_idr": 6124.865771742645,
+      "time": 1792250568.887876,
+      "pnl": null
+    },
+    {
+      "action": "SELL",
+      "pair": "sol_idr",
+      "price": 2024000.0,
+      "qty": 1.0177485290712363,
+      "fee_idr": 6179.769068520546,
+      "time": 1792250568.8887637,
+      "pnl": 18246.195629189024,
+      "pnl_pct": 0.0060000000000000105,
+      "reason": "scalp_take_profit",
+      "entry_features": {
+        "_scalp": true,
+        "_scalp_atr_pct": 0.005,
+        "rsi": 0.1,
+        "macd_hist": 0.2,
+        "ema_trend": 0.3
+      },
+      "holding_sec": 0.0008881092071533203
+    },
+    {
+      "action": "BUY",
+      "pair": "eth_idr",
+      "price": 50000,
+      "qty": 20.379140513160472,
+      "fee_idr": 3066.0692848285566,
+      "time": 1792250568.8916523,
+      "pnl": null
+    },
+    {
+      "action": "SELL",
+      "pair": "eth_idr",
+      "price": 51000,
+      "qty": 20.379140513160472,
+      "fee_idr": 3118.0084985135522,
+      "time": 1792250568.8924851,
+      "pnl": 17261.132014646893,
+      "pnl_pct": 0.014000000000000018,
+      "reason": "scalp_take_profit",
+      "entry_features": {
+        "_scalp": true
+      },
+      "holding_sec": 0.0008330345153808594
+    },
+    {
+      "action": "BUY",
+      "pair": "sol_idr",
+      "price": 2000000,
+      "qty": 1.0203722734121863,
+      "fee_idr": 6140.6556072950025,
+      "time": 1792250791.7439346,
+      "pnl": null
+    },
+    {
+      "action": "SELL",
+      "pair": "sol_idr",
+      "price": 2024000.0,
+      "qty": 1.0203722734121863,
+      "fee_idr": 6195.700444158795,
+      "time": 1792250791.744943,
+      "pnl": 18293.234117733547,
+      "pnl_pct": 0.0060000000000000105,
+      "reason": "scalp_take_profit",
+      "entry_features": {
+        "_scalp": true,
+        "_scalp_atr_pct": 0.005,
+        "rsi": 0.1,
+        "macd_hist": 0.2,
+        "ema_trend": 0.3
+      },
+      "holding_sec": 0.001008749008178711
+    },
+    {
+      "action": "BUY",
+      "pair": "eth_idr",
+      "price": 50000,
+      "qty": 20.43167770979354,
+      "fee_idr": 3073.9735772006334,
+      "time": 1792250791.7481554,
+      "pnl": null
+    },
+    {
+      "action": "SELL",
+      "pair": "eth_idr",
+      "price": 51000,
+      "qty": 20.43167770979354,
+      "fee_idr": 3126.046689598412,
+      "time": 1792250791.7491434,
+      "pnl": 17305.6310201952,
+      "pnl_pct": 0.014000000000000018,
+      "reason": "scalp_take_profit",
+      "entry_features": {
+        "_scalp": true
+      },
+      "holding_sec": 0.0009882450103759766
     }
   ]
 }

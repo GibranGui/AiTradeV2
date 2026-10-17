@@ -240,6 +240,14 @@ class CoinScanner:
                                 + float(feats["vol_sma_ratio"][i]) * 0.25, -1, 1))
         uptrend = 1.0 if (m20 > 0 and ema_fast_ok) else 0.0
 
+        # ---- R:R guardrail (FASE 5 audit — risiko koreksi setelah pump) ----
+        # Jarak harga dari EMA-90 ("kelelahan tren") dinormalisasi ATR:
+        # extended = harga sudah X*ATR di atas rata-rata panjang -> probabilitas
+        # mean-reversion naik; entry mengejar = potensi untung < potensi rugi.
+        atr_frac = max(1e-4, (float(feats["atr_pct"][i]) + 1.0) / 200.0)
+        ext_atr = abs(mom(min(n - 1, 90))) / atr_frac
+        rr_guard = bool(ext_atr <= 8.0)   # hanya guardrail; BUKAN penurunan threshold
+
         # skor konfluensi teknikal [-1..1] -> [0..1]
         tech = (sig + 1) / 2
         trend_score = float(np.clip(
@@ -250,6 +258,7 @@ class CoinScanner:
             "pair": pair, "symbol": coin["symbol"], "score": trend_score,
             "signal": sig, "mom5": m5, "mom20": m20, "uptrend": bool(uptrend),
             "vol_support": vol_sup, "last_close": float(close.iloc[-1]),
+            "ext_atr": ext_atr, "rr_guard": rr_guard,
             "live": is_live, "chg24h_pct": coin["chg24h_pct"],
             "vol_idr_24h": coin["vol_idr_24h"],
             "features": {k: float(v) for k, v in feats.iloc[i].items()},
@@ -358,5 +367,14 @@ def opportunities(results: list[dict], min_score: float,
                                 actual=f"signal={sig:+.3f} mom5={m5:+.3%} mom20={r['mom20']:+.3%}",
                                 required="mom5>=-1.5% ATAU mom20>0 ATAU signal>=2*floor")
                 continue
+        # ---- R:R guardrail (FASE 5): tolak entry yang mengejar harga sudah
+        # terlalu extended dari tren (>8 ATR) — potensi untung tak sebanding
+        # risiko koreksi. Ini PENAMBAHAN filter risiko, bukan penurunan threshold.
+        if not r.get("rr_guard", True):
+            if diag:
+                diag.reject(sym, "risk_reward", "trend_overextended",
+                            actual=f"ext_atr={r.get('ext_atr', 0):.1f}",
+                            required="<=8.0 ATR dari EMA90")
+            continue
         out.append(r)
     return out
