@@ -157,3 +157,47 @@ loop tampak "berjalan" tapi tidak pernah menuntaskan siklus.
 ## Catatan
 - Mode tetap PAPER ONLY; batas bawah aman gerbang (ENTRY_THR_MIN dll.) tidak
   disentuh; fee/likuiditas/penolakan data sintetis tetap utuh.
+
+---
+
+## ✅ 2026-10-17 — Audit "Bot tidak belajar dari 32 trade paper trading" (SELESAI)
+
+### Akar masalah (terbukti dari data state live `bot-state`, bukan spekulasi)
+**Ratchet asimetris pada adaptive threshold**: setiap LOSS menaikkan
+`entry_threshold` +0.02 flat tanpa pandang bulu; penurunan HANYA bisa datang
+dari PROFIT (-0.01). Dengan riwayat nyata 5W/27L (WR 18%), threshold mengunci
+di cap 0.45 — level yang secara matematis hampir tak pernah tercapai di pasar
+sideways → reject massal → pengalaman berhenti masuk → pembelajaran mandek.
+Analogi persis "manusia takut kehilangan Rp50rb": makin rugi makin takut,
+makin takut makin sedikit belajar, makin sedikit belajar makin tidak mampu
+profit untuk melepas rasa takut. Lingkaran setan.
+
+Bukti: `brain.json` live = entry_threshold 0.45 (persis cap), lessons buffer
+menampilkan "entry_threshold dinaikkan -> 0.45" berulang pada 8 trade terakhir;
+simulasi replay kode lama atas 32 trade nyata: threshold tetap 0.45 selamanya.
+
+### Perbaikan (`ai_trader/learning.py`)
+| Perubahan | Alasan |
+|---|---|
+| Kenaikan akibat loss mengecil seiring jumlah loss: `bump = max(0.005, 0.02·10/max(10,n_loss))` | Kapok boleh, membeku jangan. Loss ke-N tak lagi menaikkan penuh. |
+| Relief threshold (-0.005) juga diberikan pada **loss terkontrol** (\|pnl\| ≤ 1.2×stop_loss, saat WR<50%) | Rugi kecil sesuai rencana = sistem bekerja benar; hanya loss tembus-SL yang menaikkan kewaspadaan. Penurunan tidak lagi bergantung 100% pada profit. |
+| Cap pakai konstanta `ENTRY_THR_MAX` (0.45), floor `ENTRY_THR_MIN` (0.10) | Konsistensi gates ↔ learning. |
+
+Yang TIDAK diubah: bobot per-indikator credit-assignment, safety-net silence
+decay, batas risiko (SL/TP/alloc/MAX_POSITIONS), fee, mode PAPER ONLY.
+
+### Bukti hasil (dijalankan nyata)
+Replay 32 trade dengan komposisi sama seperti riwayat live (7 win +0.8%,
+25 loss terkontrol -0.6%/-0.9%) dimulai dari brain live saat ini (thr=0.45):
+- Kode LAMA : threshold akhir **0.45** (terkunci — bot abadi menolak)
+- Kode BARU : threshold akhir **0.34** dan terus turun menuju ekuilibrium
+  sehat → kandidat kembali lolos gerbang → pengalaman mengalir lagi.
+- pytest: **36/36 lulus**.
+
+### Catatan jujur
+- Ekuitas live saat audit: kas Rp7.720.612 + 1 posisi BTC terbuka; realized
+  PnL -Rp424.459 dari 32 trade (WR 21,9%). Ini fase pengumpulan pengalaman,
+  BUKAN dasar keputusan go-live (roadmap: ≥100 trade & kurva stabil).
+- Perlu dipantau 1–2 hari ke depan: `entry_threshold` di `brain.json` harus
+  mulai menurun < 0.45 dan frekuensi `[EXEC] OK` naik. Jika masih nol trade
+  setelah threshold turun, kandidat berikutnya adalah kondisi pasar ekstrem.

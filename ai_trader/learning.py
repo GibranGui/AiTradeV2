@@ -148,9 +148,20 @@ def learn_from_trade(trade: dict, strategies: list[Strategy], brain: dict) -> li
             brain["stop_loss_pct"] = round(max(0.008, brain["stop_loss_pct"] * 0.9), 4)
             lessons.append(f"stop_loss diperketat -> {brain['stop_loss_pct']:.3%}")
         # batas atas dikendurkan 0.7 -> 0.45 (gates.ENTRY_THR_MAX): kenaikan
-        # tetap ada (belajar dari rugi) tapi tak boleh mencekik proses belajar
-        brain["entry_threshold"] = min(0.45, brain["entry_threshold"] + 0.02)
-        lessons.append(f"entry_threshold dinaikkan -> {brain['entry_threshold']:.2f} (lebih selektif)")
+        # tetap ada (belajar dari rugi) tapi tak boleh mencekik proses belajar.
+        # FIX "bot tidak belajar dari 32 trade": sebelumnya setiap loss selalu
+        # +0.02 tanpa pandang bulu -> setelah rangkaian loss beruntun, threshold
+        # mengunci di cap 0.45 dan penurunan hanya bisa datang dari PROFIT
+        # (-0.01) — ratchet naik-turun yang asimetris: bot makin lama makin
+        # takut, reject terus, pengalaman berhenti masuk. Sekarang kenaikan
+        # mengecil seiring jumlah loss (0.02 -> minimal 0.005), persis seperti
+        # manusia yang sudah kapok: tetap waspada, tapi tidak membeku.
+        n_loss = brain.get("total_losses", 0)
+        bump = max(0.005, 0.02 * (10.0 / max(10.0, n_loss)))
+        brain["entry_threshold"] = min(ENTRY_THR_MAX,
+                                       round(brain["entry_threshold"] + bump, 3))
+        lessons.append(f"entry_threshold dinaikkan +{bump:.3f} "
+                       f"-> {brain['entry_threshold']:.3f} (lebih selektif)")
     else:
         brain["total_wins"] += 1
         # PROFIT ADALAH GURU TERBAIK: setelah trade untung, AI BERANI
@@ -169,6 +180,26 @@ def learn_from_trade(trade: dict, strategies: list[Strategy], brain: dict) -> li
     total = brain["total_wins"] + brain["total_losses"]
     if total >= 10:
         wr = brain["total_wins"] / total
+        # FIX asimetri keberanian: penurunan threshold kini juga boleh datang
+        # dari bukti "rugi kecil terkontrol" (bukan hanya profit). Loss dengan
+        # |pnl| <= stop_loss adalah loss yang RENCANANYA BERJALAN — sistem
+        # bekerja sebagaimana mestinya, jadi bot tidak boleh makin membeku
+        # karenanya. Hanya loss besar (tembus SL / slippage ekstrem) yang
+        # menaikkan kewaspadaan. Ini membuat equilibrium threshold turun ke
+        # level sehat bahkan saat win-rate masih rendah -> pengalaman terus
+        # masuk, pembelajaran tidak berhenti (filosofi: takut-takut kapan belajar).
+        thr_relief = (pnl_pct < 0 and abs(pnl_pct) <= brain["stop_loss_pct"] * 1.2
+                      and wr < 0.5)
+        if pnl_pct > 0 or thr_relief:
+            old_thr = brain["entry_threshold"]
+            brain["entry_threshold"] = max(ENTRY_THR_MIN,
+                                           round(old_thr - 0.005, 3))
+            if brain["entry_threshold"] < old_thr - 1e-6:
+                tag = ("profit" if pnl_pct > 0
+                       else "loss-terkontrol")
+                lessons.append(f"{tag} -> entry_threshold dilonggarkan sendiri "
+                               f"{old_thr:.3f}->{brain['entry_threshold']:.3f} "
+                               "(belajar butuh pengalaman)")
         if wr < 0.4:
             brain["alloc_frac"] = max(0.1, brain["alloc_frac"] * 0.9)
             lessons.append(f"win-rate rendah ({wr:.0%}) -> ukuran posisi dikecilkan")

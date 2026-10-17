@@ -1,5 +1,5 @@
 {
-  "cash_idr": 10155679.667144781,
+  "cash_idr": 10181860.89590027,
   "positions": [],
   "position": null,
   "trades": [
@@ -314,6 +314,58 @@
         "_scalp": true
       },
       "holding_sec": 0.0005981922149658203
+    },
+    {
+      "action": "BUY",
+      "pair": "sol_idr",
+      "price": 2000000,
+      "qty": 1.0125212628143347,
+      "fee_idr": 6093.407800286869,
+      "time": 1792246850.8430114,
+      "pnl": null
+    },
+    {
+      "action": "SELL",
+      "pair": "sol_idr",
+      "price": 2024000.0,
+      "qty": 1.0125212628143347,
+      "fee_idr": 6148.029107808641,
+      "time": 1792246850.8438382,
+      "pnl": 18152.481199735543,
+      "pnl_pct": 0.0060000000000000105,
+      "reason": "scalp_take_profit",
+      "entry_features": {
+        "_scalp": true,
+        "_scalp_atr_pct": 0.005,
+        "rsi": 0.1,
+        "macd_hist": 0.2,
+        "ema_trend": 0.3
+      },
+      "holding_sec": 0.0008270740509033203
+    },
+    {
+      "action": "BUY",
+      "pair": "eth_idr",
+      "price": 50000,
+      "qty": 20.274471048645196,
+      "fee_idr": 3050.3216221632692,
+      "time": 1792246850.8477342,
+      "pnl": null
+    },
+    {
+      "action": "SELL",
+      "pair": "eth_idr",
+      "price": 51000,
+      "qty": 20.274471048645196,
+      "fee_idr": 3101.994070442715,
+      "time": 1792246850.8486245,
+      "pnl": 17172.476978202467,
+      "pnl_pct": 0.014000000000000018,
+      "reason": "scalp_take_profit",
+      "entry_features": {
+        "_scalp": true
+      },
+      "holding_sec": 0.0008904933929443359
     }
   ]
 }
