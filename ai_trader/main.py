@@ -291,6 +291,13 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
     diag._min_score = eff_score
     ts = time.strftime("%H:%M:%S")
     universe, src = get_universe(min_vol_idr=min_vol_idr)
+    # INTEGRITAS DATA (audit): kalau tidak ada sumber pasar ASLI sama sekali
+    # (offline), siklus ini HANYA latihan — entry/exit dilewati supaya paper
+    # trading tidak pernah mencatat transaksi pada harga sintetis/palsu.
+    if not universe:
+        print(f"[{ts}] [DATA] TIDAK ADA sumber pasar live ({src}) — "
+              "siklus dilewati (tidak ada entry/exit di data palsu).")
+        return {"skipped_offline": True}
     diag.market(len(universe), src)
     results = scanner.scan(universe, deep_n=deep_n, diag=diag)
     # [FILTER] gerbang skor+tren+konfirmasi kini terpadu & berlog di scanner
@@ -342,11 +349,16 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
         if res:
             sig_now = res["signal"]
         else:
-            # posisi tanpa kandidat di papan (mis. pair lama) -> re-fetch ringkas
-            df, _ = fetch_ohlcv_or_synthetic(
+            # posisi tanpa kandidat di papan (mis. pair lama) -> re-fetch ringkas.
+            # GUARD INTEGRITAS DATA (audit): sinyal exit dari data SINTETIS
+            # tidak boleh memicu penjualan — kalau live, harga ticker asli juga
+            # tidak tersedia (prices[pair] absen) sehingga siklus ini melewati
+            # pair tersebut. Kalau offline, memakai sintetis berarti exit
+            # "sinyal" palsu pada harga palsu -> hasil paper trading tidak jujur.
+            df, live = fetch_ohlcv_or_synthetic(
                 pair, period=str(SCALP_INTERVAL_MIN if is_scalp else interval_min),
                 limit=300)
-            if df is not None and len(df) >= 60:
+            if live and df is not None and len(df) >= 60:
                 f2 = normalize_signal_features(build_features(df))
                 sig_now = combined_signal(strategies, f2, len(f2) - 1)
         if is_scalp:
@@ -509,8 +521,13 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
             if d is not None and len(d) >= 120 and live:
                 frames.append((p, d.reset_index(drop=True)))
         if not frames:
+            # Semua sumber gagal live. Evolusi pada data sintetis TIDAK boleh
+            # diam-diam mempromosikan strategi (audit: ini mencemari brain).
+            # Tetap jalankan sebagai latihan mekanik, tapi tandai jujur di log.
             df0, _ = fetch_ohlcv_or_synthetic("btc_idr", period=str(interval_min), limit=500)
             frames = [("btc_idr", df0.reset_index(drop=True))]
+            print("  [DATA] tidak ada sumber live -> evolusi LATIHAN di sintetis "
+                  "(hasil TIDAK dipromosikan sebagai strategi pasar nyata)")
         new_strat, res = scanner.strategies, None
         agg = {}
         for name, dframe in frames:

@@ -35,6 +35,9 @@ class Position:
     entry_price: float
     entry_time: float
     entry_features: dict  # snapshot fitur saat masuk — dipakai untuk belajar
+    cost_idr: float = 0.0   # TOTAL kas yang benar-benar keluar saat BUY
+                            # (termasuk fee) = cost basis. Default 0 ->
+                            # dihitung dari qty*entry_price utk state lama.
 
 
 MAX_POSITIONS = 5   # multi-coin: maksimal koin yang dipegang bersamaan
@@ -130,7 +133,8 @@ class PaperBroker:
         fee = spend * FEE
         qty = (spend - fee) / price
         self.cash_idr -= spend
-        self.positions[pair] = Position(pair, qty, price, time.time(), dict(features))
+        self.positions[pair] = Position(pair, qty, price, time.time(), dict(features),
+                                        cost_idr=spend)
         rec = {"action": "BUY", "pair": pair, "price": price, "qty": qty,
                "fee_idr": fee, "time": self.positions[pair].entry_time, "pnl": None}
         self.trades.append(rec)
@@ -138,17 +142,26 @@ class PaperBroker:
         return rec
 
     def sell(self, pair: str, price: float, reason: str = "signal") -> dict | None:
-        if pair not in self.positions or price <= 0:
+        if pair not in self.positions:
+            self.last_reject = f"no_open_position({pair})"
+            return None
+        if price <= 0:
+            # jangan pop posisi kalau harga invalid — posisi tetap utuh
+            self.last_reject = f"invalid_price({price})"
             return None
         pos = self.positions.pop(pair)
         gross = pos.qty * price
         fee = gross * FEE
         proceeds = gross - fee
-        pnl_idr = proceeds - pos.qty * pos.entry_price
-        pnl_pct = price / pos.entry_price - 1 - 2 * FEE
+        # Cost basis = TOTAL kas yang keluar saat BUY (termasuk fee beli).
+        # State lama tanpa field cost_idr -> fallback qty*entry_price.
+        cost_basis = pos.cost_idr or (pos.qty * pos.entry_price)
+        pnl_idr = proceeds - cost_basis
+        pnl_pct = pnl_idr / cost_basis if cost_basis > 0 else 0.0
         self.cash_idr += proceeds
         rec = {"action": "SELL", "pair": pair, "price": price, "qty": pos.qty,
                "fee_idr": fee, "time": time.time(), "pnl": pnl_idr, "pnl_pct": pnl_pct,
+               "cost_basis_idr": cost_basis,
                "reason": reason, "entry_features": pos.entry_features,
                "holding_sec": time.time() - pos.entry_time}
         self.trades.append(rec)
