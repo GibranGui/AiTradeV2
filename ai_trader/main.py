@@ -52,6 +52,12 @@ from ai_trader.scanner import (CoinScanner, get_universe, opportunities,
                              DEFAULT_MIN_SCORE, SIGNAL_FLOOR)
 from ai_trader.strategies.portfolio import portfolio_gates
 from ai_trader.gates import apply_silence_decay, sync_brain
+
+# Ambang exit-sinyal TETAP dan longgar: keputusan keluar tidak boleh ikut
+# threshold entry yang dinaikkan AI (bug "exit tersandera": thr 0.45 membuat
+# signal_exit butuh sig<-0.225 = hanya 0,8% bar -> posisi menggantung sampai
+# SL penuh; WR trend nyata cuma 7%, EV -Rp26.800/trade).
+SIGNAL_EXIT_FLOOR = 0.10
 from ai_trader.diag import CycleDiag
 from ai_trader.learning import (
     load_brain, save_brain, learn_from_trade, evolve, run_backtest, log_experience,
@@ -120,7 +126,7 @@ def run_loop(pair: str, interval_min: int, poll_sec: int, evolve_every: int,
                     reason = "stop_loss"
                 elif chg >= brain["take_profit_pct"]:
                     reason = "take_profit"
-                elif sig < -brain["entry_threshold"] * 0.5:
+                elif sig < -SIGNAL_EXIT_FLOOR:   # exit tidak boleh tersandera threshold entry
                     reason = "signal_exit"
                 if reason:
                     trade = broker.sell(pair, price, reason)
@@ -372,7 +378,13 @@ def _scan_cycle(broker, brain, strategies, scanner, diag, cycle,
                 chg < peak - max(brain["stop_loss_pct"], 0.02):
             reason = "trailing_stop"      # kunci profit saat tren patah
         else:
-            if sig_now is not None and sig_now < -brain["entry_threshold"] * 0.5:
+            # FIX BUG "exit tersandera": dulu ambang signal_exit ikut threshold
+            # entry yang dinaikkan AI (thr=0.45 -> butuh sig<-0.225, hanya 0.8%
+            # dari bar). Posisi tren tak pernah bisa keluar via sinyal -> menggantung
+            # sampai SL/trailing penuh (WR trend 7%, EV -Rp26.800/trade).
+            # Exit adalah keputusan terpisah dari entry: pakai ambang tetap yang
+            # longgar; TP/SL/trailing tetap menjadi pengaman utama.
+            if sig_now is not None and sig_now < -SIGNAL_EXIT_FLOOR:
                 reason = "signal_exit"
         if reason:
             trade = broker.sell(pair, price, reason)
