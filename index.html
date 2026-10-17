@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI TradeV2 — Dashboard</title>
+<style>
+ :root{{--bg:#0d1117;--card:#161b22;--line:#30363d;--tx:#e6edf3;--dim:#8b949e;
+        --up:#3fb950;--down:#f85149;--acc:#58a6ff}}
+ *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);
+   font:14px/1.5 -apple-system,'Segoe UI',Roboto,sans-serif;padding:24px}
+ h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;color:var(--acc);margin:28px 0 10px}
+ .sub{color:var(--dim);font-size:12px;margin-bottom:20px}
+ .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+ .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+ .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+ .v{font-size:18px;font-weight:600;margin-top:2px}
+ .pos{color:var(--up)}.neg{color:var(--down)}
+ svg{background:var(--card);border:1px solid var(--line);border-radius:8px;width:100%;height:auto}
+ table{border-collapse:collapse;width:100%;background:var(--card);border:1px solid var(--line);
+   border-radius:8px;overflow:hidden}
+ th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+ th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase}
+ tr:last-child td{border-bottom:none}
+ .note{color:var(--dim);font-size:12px;margin-top:6px}
+ .badge{display:inline-block;background:#1f6feb22;color:var(--acc);border:1px solid #1f6feb55;
+   border-radius:99px;padding:1px 8px;font-size:11px;margin-left:8px}
+</style></head><body>
+<h1>🤖 AI TradeV2 — Dashboard Paper Trading <span class="badge">mode simulasi, uang virtual</span></h1>
+<div class="sub">Diperbarui otomatis oleh GitHub Actions · 17 Oct 2026 18:18 UTC · data pasar asli Indodax/Binance-IDR</div>
+
+<h2>💰 Kinerja</h2>
+<div class="grid"><div class="card"><div class="k">Trade selesai</div><div class="v ">34</div></div><div class="card"><div class="k">Win rate</div><div class="v neg">21%</div></div><div class="card"><div class="k">PnL total</div><div class="v neg">Rp-438,007</div></div><div class="card"><div class="k">Return</div><div class="v neg">-4.38%</div></div><div class="card"><div class="k">Kas tersedia</div><div class="v ">Rp8,560,020</div></div><div class="card"><div class="k">Posisi terbuka</div><div class="v ">1</div></div></div>
+<div class="note">Modal awal Rp10,000,000 · Ekuitas akhir Rp9,561,993
+ · Drawdown maks 4.5% · Sharpe -2.54</div>
+
+<h2>📈 Kurva Ekuitas (per trade selesai)</h2>
+<svg viewBox="0 0 900 280" xmlns="http://www.w3.org/2000/svg">
+<line x1="40" y1="46.1" x2="860" y2="46.1" stroke="#8b949e" stroke-dasharray="4 4"/>
+<text x="44" y="40.1" fill="#8b949e" font-size="11">modal awal Rp10,000,000</text>
+<polyline points="40.0,46.1 40.0,42.4 73.6,40.0 86.4,42.2 97.5,65.7 99.2,75.3 101.9,143.4 102.5,148.1 170.3,140.3 211.4,142.2 237.6,151.7 251.0,151.2 251.0,149.1 281.5,146.2 294.8,147.5 400.7,160.5 407.3,174.2 496.1,153.5 545.4,155.5 549.0,169.1 550.1,184.0 554.8,191.1 555.4,197.8 568.1,203.6 582.6,207.1 674.4,209.5 696.8,210.5 726.3,223.2 729.2,225.5 742.7,229.2 760.6,230.3 794.0,232.3 823.3,234.0 850.7,234.9 860.0,240.0" fill="none" stroke="#f85149" stroke-width="2"/><circle cx="40.0" cy="46.1" r="2.5" fill="#f85149"/><circle cx="40.0" cy="42.4" r="2.5" fill="#f85149"/><circle cx="73.6" cy="40.0" r="2.5" fill="#f85149"/><circle cx="86.4" cy="42.2" r="2.5" fill="#f85149"/><circle cx="97.5" cy="65.7" r="2.5" fill="#f85149"/><circle cx="99.2" cy="75.3" r="2.5" fill="#f85149"/><circle cx="101.9" cy="143.4" r="2.5" fill="#f85149"/><circle cx="102.5" cy="148.1" r="2.5" fill="#f85149"/><circle cx="170.3" cy="140.3" r="2.5" fill="#f85149"/><circle cx="211.4" cy="142.2" r="2.5" fill="#f85149"/><circle cx="237.6" cy="151.7" r="2.5" fill="#f85149"/><circle cx="251.0" cy="151.2" r="2.5" fill="#f85149"/><circle cx="251.0" cy="149.1" r="2.5" fill="#f85149"/><circle cx="281.5" cy="146.2" r="2.5" fill="#f85149"/><circle cx="294.8" cy="147.5" r="2.5" fill="#f85149"/><circle cx="400.7" cy="160.5" r="2.5" fill="#f85149"/><circle cx="407.3" cy="174.2" r="2.5" fill="#f85149"/><circle cx="496.1" cy="153.5" r="2.5" fill="#f85149"/><circle cx="545.4" cy="155.5" r="2.5" fill="#f85149"/><circle cx="549.0" cy="169.1" r="2.5" fill="#f85149"/><circle cx="550.1" cy="184.0" r="2.5" fill="#f85149"/><circle cx="554.8" cy="191.1" r="2.5" fill="#f85149"/><circle cx="555.4" cy="197.8" r="2.5" fill="#f85149"/><circle cx="568.1" cy="203.6" r="2.5" fill="#f85149"/><circle cx="582.6" cy="207.1" r="2.5" fill="#f85149"/><circle cx="674.4" cy="209.5" r="2.5" fill="#f85149"/><circle cx="696.8" cy="210.5" r="2.5" fill="#f85149"/><circle cx="726.3" cy="223.2" r="2.5" fill="#f85149"/><circle cx="729.2" cy="225.5" r="2.5" fill="#f85149"/><circle cx="742.7" cy="229.2" r="2.5" fill="#f85149"/><circle cx="760.6" cy="230.3" r="2.5" fill="#f85149"/><circle cx="794.0" cy="232.3" r="2.5" fill="#f85149"/><circle cx="823.3" cy="234.0" r="2.5" fill="#f85149"/><circle cx="850.7" cy="234.9" r="2.5" fill="#f85149"/><circle cx="860.0" cy="240.0" r="2.5" fill="#f85149"/>
+<text x="40" y="18" fill="#e6edf3" font-size="12">Ekuitas (min Rp9,561,993 — maks Rp10,013,683)</text>
+</svg>
+
+<h2>🪙 Performa per Koin</h2>
+<table><tr><th>Koin</th><th>Trade</th><th>Menang</th><th>PnL</th></tr><tr><td>aster_idr</td><td>1</td><td>1</td><td class='pos'>Rp46,554</td></tr><tr><td>avax_idr</td><td>2</td><td>2</td><td class='pos'>Rp23,029</td></tr><tr><td>xrp_idr</td><td>6</td><td>2</td><td class='neg'>Rp-11,514</td></tr><tr><td>pol_idr</td><td>1</td><td>0</td><td class='neg'>Rp-13,239</td></tr><tr><td>sol_idr</td><td>1</td><td>0</td><td class='neg'>Rp-15,160</td></tr><tr><td>doge_idr</td><td>2</td><td>0</td><td class='neg'>Rp-16,028</td></tr><tr><td>eth_idr</td><td>5</td><td>1</td><td class='neg'>Rp-33,140</td></tr><tr><td>wld_idr</td><td>2</td><td>0</td><td class='neg'>Rp-39,012</td></tr><tr><td>btc_idr</td><td>7</td><td>1</td><td class='neg'>Rp-45,218</td></tr><tr><td>tko_idr</td><td>3</td><td>0</td><td class='neg'>Rp-68,297</td></tr><tr><td>manta_idr</td><td>4</td><td>0</td><td class='neg'>Rp-265,981</td></tr></table>
+
+<h2>🧠 Perkembangan Latihan AI</h2>
+<div class="grid"><div class="card"><div class="k">Generasi strategi</div><div class="v ">9</div></div><div class="card"><div class="k">Fitness terbaik</div><div class="v pos">36.0</div></div><div class="card"><div class="k">Entry threshold</div><div class="v ">0.45</div></div><div class="card"><div class="k">Stop loss / TP</div><div class="v ">0.8% / 3.5%</div></div><div class="card"><div class="k">Log pengalaman</div><div class="v ">44 entri</div></div></div>
+<div class="sub">Evolusi strategi terbaru (backtest internal):</div><table><tr><th>Waktu (UTC)</th><th>Gen</th><th>Trades</th><th>Return</th><th>Win%</th><th>Fitness</th></tr><tr><td>13/10 12:07</td><td>6</td><td>3</td><td class="pos">+3.53%</td><td>100%</td><td>36.0</td></tr><tr><td>13/10 12:07</td><td>2</td><td>8</td><td class="pos">+0.36%</td><td>50%</td><td>9.6</td></tr><tr><td>11/10 10:50</td><td>6</td><td>3</td><td class="neg">-87.04%</td><td>67%</td><td>-130.5</td></tr><tr><td>11/10 10:50</td><td>6</td><td>1</td><td class="neg">-48.49%</td><td>100%</td><td>-60.6</td></tr><tr><td>11/10 10:49</td><td>6</td><td>0</td><td class="pos">+0.00%</td><td>0%</td><td>0.0</td></tr><tr><td>11/10 10:48</td><td>6</td><td>0</td><td class="pos">+0.00%</td><td>0%</td><td>0.0</td></tr><tr><td>11/10 10:48</td><td>6</td><td>0</td><td class="pos">+0.00%</td><td>0%</td><td>0.0</td></tr><tr><td>11/10 10:47</td><td>6</td><td>0</td><td class="pos">+0.00%</td><td>0%</td><td>0.0</td></tr><tr><td>11/10 10:42</td><td>6</td><td>0</td><td class="pos">+0.00%</td><td>0%</td><td>0.0</td></tr></table>
+<div class="note">Setiap trade rugi → bobot strategi di-penal (credit assignment).
+ Tiap siklus evolve → AI mutate parameter, backtest, dan hanya menyimpan varian terbaik.</div>
+
+<h2>📌 Posisi Terbuka Sekarang</h2>
+<table><tr><th>Koin</th><th>Jumlah</th><th>Harga masuk</th><th>Masuk pada (UTC)</th></tr><tr><td>btc_idr</td><td>0.00058510</td><td>Rp1,459,802,000</td><td>17/10 13:07</td></tr></table>
+
+<div class="note" style="margin-top:24px">⚠️ Ini PAPER TRADING dengan harga pasar asli.
+ Bukan nasihat keuangan. Jangan aktifkan uang real sebelum ≥100 trade profit konsisten &amp; DD&lt;10%.</div>
+</body></html>
