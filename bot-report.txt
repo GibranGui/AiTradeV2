@@ -1,0 +1,144 @@
+
+--- paper_wallet.json ---
+{
+  "cash_idr": 6225820.841015352,
+  "positions": [
+    {
+      "pair": "btc_idr",
+      "qty": 0.0005601644646685491,
+      "entry_price": 1375689526.0,
+      "entry_time": 1793984573.618164,
+      "entry_features": {
+        "rsi": 0.041912479372868905,
+        "macd_hist": 0.09170355557325127,
+        "ema_trend": 0.19880390914223867,
+        "close": 1375689526.0,
+        "volume": 0.0,
+        "ema_fast": 1373139065.2179656,
+        "ema_slow": 1374160617.9252036,
+        "bb_pos": 0.17151211176053693,
+        "stoch_k": 0.7074402147422424,
+        "atr_raw": 0.004068912686387939,
+        "atr_pct": -0.9186217462722412,
+        "engulfing_bull": 0.0,
+        "engulfing_bear": 0.0,
+        "hammer": 0.0,
+        "shooting_star": 0.0,
+        "doji": 1.0,
+        "marubozu_bull": 0.0,
+        "marubozu_bear": 0.0,
+        "three_white": 0.0,
+        "three_black": 0.0,
+        "inside_bar": 1.0,
+        "vol_sma_ratio": 0.0,
+        "obv_slope": 0.10951487030734393,
+        "vwap_dev": 0.13341354621913512,
+        "volatility_pct": 0.3202271893397657,
+        "_scalp": true,
+        "_scalp_atr_pct": 0.001,
+        "_scan_score": 0.0732316035454305
+      },
+      "cost_idr": 772931.1804231898
+    },
+    {
+      "pair": "eth_idr",
+      "qty": 0.017027344507820112,
+      "entry_price": 40586182.0,
+      "entry_time": 1794008531.5034602,
+      "entry_features": {
+        "rsi": 0.15736761247287223,
+        "macd_hist": 0.13766283820135253,
+        "ema_trend": 0.515824793174
+
+--- brain.json ---
+{
+  "entry_threshold": 0.105,
+  "stop_loss_pct": 0.008,
+  "take_profit_pct": 0.035,
+  "alloc_frac": 0.1,
+  "lr": 0.1,
+  "total_wins": 60,
+  "total_losses": 322,
+  "score_min": 0.35,
+  "signal_floor": 0.02,
+  "scalp_strong": 0.1,
+  "scalp_floor": 0.04,
+  "_silence_anchor": 1794055903.789049
+}
+
+--- pengalaman terakhir (401 entri) ---
+{"t": 1794005925.4326792, "type": "online", "pnl_pct": -0.0026686311025884628, "reason": "scalp_time_stop", "lessons": ["ema_trend: rugi -> bobot turun 0.96->0.95", "macd_momentum: rugi -> bobot turun 0.99->0.98", "candle_reversal: rugi -> bobot turun 1.28->1.26", "vwap_reversion: rugi -> bobot turu
+{"t": 1794039095.9567242, "type": "silence_decay", "lesson": "AI melonggarkan gerbang sendiri (idle 4.0h tanpa trade): entry_thr->0.10 score_min->0.35 floor->0.01 scalp->0.10/0.04 (belajar butuh pengalaman; batas bawah aman tetap dijaga)"}
+{"t": 1794046396.7188284, "type": "online", "pnl_pct": -0.0201469559152329, "reason": "stop_loss", "lessons": ["candle_reversal: rugi -> bobot turun 1.28->1.19", "macd_momentum: rugi -> bobot turun 0.99->0.92", "ema_trend: rugi -> bobot turun 0.96->0.90", "vwap_reversion: rugi -> bobot turun 1.64->1
+
+--- paper_wallet.json ---
+{
+  "cash_idr": 6225820.841015352,
+  "positions": [
+    {
+      "pair": "btc_idr",
+      "qty": 0.0005601644646685491,
+      "entry_price": 1375689526.0,
+      "entry_time": 1793984573.618164,
+      "entry_features": {
+        "rsi": 0.041912479372868905,
+        "macd_hist": 0.09170355557325127,
+        "ema_trend": 0.19880390914223867,
+        "close": 1375689526.0,
+        "volume": 0.0,
+        "ema_fast": 1373139065.2179656,
+        "ema_slow": 1374160617.9252036,
+        "bb_pos": 0.17151211176053693,
+        "stoch_k": 0.7074402147422424,
+        "atr_raw": 0.004068912686387939,
+        "atr_pct": -0.9186217462722412,
+        "engulfing_bull": 0.0,
+        "engulfing_bear": 0.0,
+        "hammer": 0.0,
+        "shooting_star": 0.0,
+        "doji": 1.0,
+        "marubozu_bull": 0.0,
+        "marubozu_bear": 0.0,
+        "three_white": 0.0,
+        "three_black": 0.0,
+        "inside_bar": 1.0,
+        "vol_sma_ratio": 0.0,
+        "obv_slope": 0.10951487030734393,
+        "vwap_dev": 0.13341354621913512,
+        "volatility_pct": 0.3202271893397657,
+        "_scalp": true,
+        "_scalp_atr_pct": 0.001,
+        "_scan_score": 0.0732316035454305
+      },
+      "cost_idr": 772931.1804231898
+    },
+    {
+      "pair": "eth_idr",
+      "qty": 0.017027344507820112,
+      "entry_price": 40586182.0,
+      "entry_time": 1794008531.5034602,
+      "entry_features": {
+        "rsi": 0.15736761247287223,
+        "macd_hist": 0.13766283820135253,
+        "ema_trend": 0.515824793174
+
+--- brain.json ---
+{
+  "entry_threshold": 0.105,
+  "stop_loss_pct": 0.008,
+  "take_profit_pct": 0.035,
+  "alloc_frac": 0.1,
+  "lr": 0.1,
+  "total_wins": 60,
+  "total_losses": 322,
+  "score_min": 0.35,
+  "signal_floor": 0.02,
+  "scalp_strong": 0.1,
+  "scalp_floor": 0.04,
+  "_silence_anchor": 1794057115.8960445
+}
+
+--- pengalaman terakhir (401 entri) ---
+{"t": 1794005925.4326792, "type": "online", "pnl_pct": -0.0026686311025884628, "reason": "scalp_time_stop", "lessons": ["ema_trend: rugi -> bobot turun 0.96->0.95", "macd_momentum: rugi -> bobot turun 0.99->0.98", "candle_reversal: rugi -> bobot turun 1.28->1.26", "vwap_reversion: rugi -> bobot turu
+{"t": 1794039095.9567242, "type": "silence_decay", "lesson": "AI melonggarkan gerbang sendiri (idle 4.0h tanpa trade): entry_thr->0.10 score_min->0.35 floor->0.01 scalp->0.10/0.04 (belajar butuh pengalaman; batas bawah aman tetap dijaga)"}
+{"t": 1794046396.7188284, "type": "online", "pnl_pct": -0.0201469559152329, "reason": "stop_loss", "lessons": ["candle_reversal: rugi -> bobot turun 1.28->1.19", "macd_momentum: rugi -> bobot turun 0.99->0.92", "ema_trend: rugi -> bobot turun 0.96->0.90", "vwap_reversion: rugi -> bobot turun 1.64->1
