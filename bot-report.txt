@@ -1,0 +1,144 @@
+
+--- paper_wallet.json ---
+{
+  "cash_idr": 5551873.226975634,
+  "positions": [
+    {
+      "pair": "tao_idr",
+      "qty": 0.15452794215763554,
+      "entry_price": 4015984.0,
+      "entry_time": 1794425222.6343095,
+      "entry_features": {
+        "rsi": 0.06040247674955079,
+        "macd_hist": 0.08713465786669398,
+        "ema_trend": 0.35782143186685245,
+        "close": 4015984.0,
+        "volume": 16.487,
+        "ema_fast": 4033522.8195335036,
+        "ema_slow": 4004240.0826114384,
+        "bb_pos": 0.18700328631168905,
+        "stoch_k": -0.2999133556133185,
+        "atr_raw": 0.004511843794900085,
+        "atr_pct": -0.9097631241019983,
+        "engulfing_bull": 0.0,
+        "engulfing_bear": 0.0,
+        "hammer": 0.0,
+        "shooting_star": 0.0,
+        "doji": 0.0,
+        "marubozu_bull": 0.0,
+        "marubozu_bear": 0.0,
+        "three_white": 0.0,
+        "three_black": 0.0,
+        "inside_bar": 0.0,
+        "vol_sma_ratio": 8.631259325183889,
+        "obv_slope": -0.2543551737304894,
+        "vwap_dev": 0.12845488719961248,
+        "volatility_pct": 0.6743100036516545,
+        "_scan_score": 0.4116589256231924
+      },
+      "cost_idr": 622449.0905295786
+    },
+    {
+      "pair": "btc_idr",
+      "qty": 0.0005138930704622599,
+      "entry_price": 1335824194.0,
+      "entry_time": 1794475459.775966,
+      "entry_features": {
+        "rsi": -0.22877118623608694,
+        "macd_hist": 0.035339318119356054,
+        "ema_trend": -0.14673342177147278,
+        "close": 1335824194.0,
+    
+
+--- brain.json ---
+{
+  "entry_threshold": 0.11,
+  "stop_loss_pct": 0.008,
+  "take_profit_pct": 0.035,
+  "alloc_frac": 0.1,
+  "lr": 0.1,
+  "total_wins": 64,
+  "total_losses": 354,
+  "score_min": 0.35,
+  "signal_floor": 0.02,
+  "scalp_strong": 0.1,
+  "scalp_floor": 0.04,
+  "_silence_anchor": 1794484958.1138763
+}
+
+--- pengalaman terakhir (443 entri) ---
+{"t": 1794476717.505168, "type": "online", "pnl_pct": -0.0027030357555391394, "reason": "scalp_signal_exit", "lessons": ["macd_momentum: rugi -> bobot turun 0.99->0.98", "volume_spike: rugi -> bobot turun 1.77->1.76", "ema_trend: rugi -> bobot turun 0.96->0.95", "entry_threshold dinaikkan +0.005 -> 
+{"t": 1794479800.7159836, "type": "online", "pnl_pct": -0.007695901091475988, "reason": "scalp_signal_exit", "lessons": ["macd_momentum: rugi -> bobot turun 0.99->0.96", "ema_trend: rugi -> bobot turun 0.96->0.94", "entry_threshold dinaikkan +0.005 -> 0.110 (lebih selektif)", "loss-terkontrol -> ent
+{"t": 1794541075.9657447, "type": "online", "pnl_pct": -0.03495238236094691, "reason": "stop_loss", "lessons": ["rsi_reversal: rugi -> bobot turun 1.99->1.79", "vwap_reversion: rugi -> bobot turun 1.64->1.48", "stochastic_os: rugi -> bobot turun 1.25->1.12", "stop_loss diperketat -> 0.800%", "entry_
+
+--- paper_wallet.json ---
+{
+  "cash_idr": 4996685.904278071,
+  "positions": [
+    {
+      "pair": "tao_idr",
+      "qty": 0.15452794215763554,
+      "entry_price": 4015984.0,
+      "entry_time": 1794425222.6343095,
+      "entry_features": {
+        "rsi": 0.06040247674955079,
+        "macd_hist": 0.08713465786669398,
+        "ema_trend": 0.35782143186685245,
+        "close": 4015984.0,
+        "volume": 16.487,
+        "ema_fast": 4033522.8195335036,
+        "ema_slow": 4004240.0826114384,
+        "bb_pos": 0.18700328631168905,
+        "stoch_k": -0.2999133556133185,
+        "atr_raw": 0.004511843794900085,
+        "atr_pct": -0.9097631241019983,
+        "engulfing_bull": 0.0,
+        "engulfing_bear": 0.0,
+        "hammer": 0.0,
+        "shooting_star": 0.0,
+        "doji": 0.0,
+        "marubozu_bull": 0.0,
+        "marubozu_bear": 0.0,
+        "three_white": 0.0,
+        "three_black": 0.0,
+        "inside_bar": 0.0,
+        "vol_sma_ratio": 8.631259325183889,
+        "obv_slope": -0.2543551737304894,
+        "vwap_dev": 0.12845488719961248,
+        "volatility_pct": 0.6743100036516545,
+        "_scan_score": 0.4116589256231924
+      },
+      "cost_idr": 622449.0905295786
+    },
+    {
+      "pair": "btc_idr",
+      "qty": 0.0005138930704622599,
+      "entry_price": 1335824194.0,
+      "entry_time": 1794475459.775966,
+      "entry_features": {
+        "rsi": -0.22877118623608694,
+        "macd_hist": 0.035339318119356054,
+        "ema_trend": -0.14673342177147278,
+        "close": 1335824194.0,
+    
+
+--- brain.json ---
+{
+  "entry_threshold": 0.11,
+  "stop_loss_pct": 0.008,
+  "take_profit_pct": 0.035,
+  "alloc_frac": 0.1,
+  "lr": 0.1,
+  "total_wins": 64,
+  "total_losses": 354,
+  "score_min": 0.35,
+  "signal_floor": 0.02,
+  "scalp_strong": 0.1,
+  "scalp_floor": 0.04,
+  "_silence_anchor": 1794484958.1138763
+}
+
+--- pengalaman terakhir (443 entri) ---
+{"t": 1794476717.505168, "type": "online", "pnl_pct": -0.0027030357555391394, "reason": "scalp_signal_exit", "lessons": ["macd_momentum: rugi -> bobot turun 0.99->0.98", "volume_spike: rugi -> bobot turun 1.77->1.76", "ema_trend: rugi -> bobot turun 0.96->0.95", "entry_threshold dinaikkan +0.005 -> 
+{"t": 1794479800.7159836, "type": "online", "pnl_pct": -0.007695901091475988, "reason": "scalp_signal_exit", "lessons": ["macd_momentum: rugi -> bobot turun 0.99->0.96", "ema_trend: rugi -> bobot turun 0.96->0.94", "entry_threshold dinaikkan +0.005 -> 0.110 (lebih selektif)", "loss-terkontrol -> ent
+{"t": 1794541075.9657447, "type": "online", "pnl_pct": -0.03495238236094691, "reason": "stop_loss", "lessons": ["rsi_reversal: rugi -> bobot turun 1.99->1.79", "vwap_reversion: rugi -> bobot turun 1.64->1.48", "stochastic_os: rugi -> bobot turun 1.25->1.12", "stop_loss diperketat -> 0.800%", "entry_
