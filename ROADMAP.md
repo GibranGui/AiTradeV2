@@ -1,0 +1,203 @@
+# ROADMAP & Checkpoint Proyek — AiTradeV2
+
+Mode: **PAPER TRADING ONLY** (uang sungguhan dinonaktifkan default; lihat
+`ai_trader/live_broker.py` + guard `LIVE_TRADING=1` + `data/LIVE_CONFIRM.txt`).
+
+---
+
+## ✅ 2026-10-14 — Audit "Bot berjalan, 0 transaksi selama 12 jam" (SELESAI)
+
+### Akar masalah (terbukti dari kode + data live, bukan spekulasi)
+**Dead-gate logic**: gerbang skor scanner (aditif, ambang 0.62) dan gerbang
+konfirmasi entry (`signal >= 0.15` di main.py) tidak pernah disatukan →
+kandidat lolos skor gugur senyap di konfirmasi tanpa satu baris log pun.
+Bug sekunder: silent failure `PaperBroker.buy()` (return None tanpa alasan),
+satu siklus exception mematikan seluruh loop, README/`list` menyesatkan.
+
+Bukti pendukung: state wallet sehat (kas penuh, 0 posisi, MAX_POSITIONS=5
+tidak menghalangi); data pasar valid (31 pasar binance-idr; sintetis ditolak
+benar); backtest portofolio pada data live menghasilkan trade (event sinyal
+valid memang ada — jalur scanner→entry yang tidak menyambungkannya).
+
+### Perbaikan (commit `4f49022`)
+| File | Perubahan |
+|---|---|
+| `ai_trader/scanner.py` | Gerbang terpadu di `opportunities()`: skor ≥ min_score **DAN** uptrend **DAN** signal ≥ 0.15 **DAN** konfluensi momentum; setiap penolakan dicatat per simbol/tahap/nilai/threshold. Try/except per kandidat di `analyze()`. |
+| `ai_trader/paper_broker.py` | `last_reject` menyimpan alasan tiap penolakan buy (already_holding_pair / invalid_price / max_positions_reached / insufficient_available_balance). |
+| `ai_trader/main.py` | `_scan_cycle()` dipecah + try/except per siklus (kegagalan tercatat ke experience buffer, loop lanjut); log `[ENTRY]`/`[EXEC]`; `do_list()` pakai gerbang sama dengan loop trading. |
+| `ai_trader/diag.py` (baru) | Logging terstruktur `[MARKET] [FILTER] [ENTRY] [REJECT] [EXEC] [SUMMARY] [FUNNEL]` — aditif, tidak mengubah keputusan, tidak menyentuh rahasia. |
+
+Yang TIDAK diubah: threshold strategi (0.62 & floor 0.15 tetap), filter risiko,
+mekanisme exit (SL/TP/trailing/signal_exit), pembelajaran online + evolusi,
+persistensi state, mode PAPER ONLY.
+
+### Pengujian (Fase 5) — suite pytest `tests/test_pipeline.py`
+Semua mock/data terkendali di tmp_path; tidak ada transaksi sungguhan.
+
+| # | Tes | Hasil |
+|---|---|---|
+| 1 | Scanner: data pasar valid (live) | ✅ pass |
+| 2 | Scanner: data kosong / exception / sintetis ditolak | ✅ pass (3 tes) |
+| 3 | Setiap alasan penolakan entry (score/trend/floor/momentum-conflict) | ✅ pass (4 tes) |
+| 4 | Kandidat memenuhi SELURUH syarat entry → lolos | ✅ pass |
+| 5 | Saldo tidak mencukupi → `insufficient_available_balance` | ✅ pass |
+| 6 | Batas posisi maksimum → `max_positions_reached` | ✅ pass |
+| 7 | Pembukaan posisi paper + persisten ke wallet | ✅ pass |
+| 8 | Round-trip state + migrasi format wallet lama | ✅ pass |
+| 9 | Posisi tertutup tidak dihitung terbuka lagi (sell → slot bebas) | ✅ pass |
+| 10 | Satu siklus gagal tidak menghentikan loop (+ tercatat `cycle_error`) | ✅ pass |
+| 11 | Entry penuh end-to-end: kandidat valid → `broker.buy` dipanggil → posisi tersimpan | ✅ pass |
+| 12 | Konsistensi gerbang: sinyal lemah ditolak DI SCANNER GATE dengan log REJECT | ✅ pass |
+
+**Hasil aktual: `19 passed`** (dijalankan lokal `python -m pytest tests/ -q`;
+CI workflow kini menjalankan suite ini otomatis + upload artifact JUnit).
+
+Temuan saat pengujian (bukan bug produksi): desain memakai Series pandas
+dengan key posisional → `FutureWarning` deprecation (berkas:
+`strategies/portfolio.py`, `scanner.py`) — layak dibersihkan terpisah.
+
+### Diagnosis kondisi saat ini (bukan bug)
+Dengan gerbang terpadu, funnel live hari ini menunjukkan pasar IDR-alts
+memang belum memberi kandidat yang memenuhi SELURUH syarat (ambang efektif
+≈ P(signal>0.25 & skor≥0.62 & uptrend) ≈ langka by design — disiplin, bukan
+cacat). Ketika peluang sejati muncul, ia lolos dan dieksekusi dengan log
+lengkap. Prioritas proyek: KEBENARAN DIAGNOSIS > KEAMANAN > KUALITAS > FREKUENSI.
+
+---
+
+## ✅ 2026-10-14 — Perbaikan loop Actions: run dibatalkan & double-dispatch (SELESAI)
+
+### Gejala
+Run Paper Trader beruntun berkesimpulan `cancelled` (mis. #38519257448,
+#38523466957, #38523483673, #38523631951) — state snapshot bot-state hilang,
+loop tampak "berjalan" tapi tidak pernah menuntaskan siklus.
+
+### Akar masalah (terbukti dari riwayat API Actions + kode workflow)
+1. `concurrency.cancel-in-progress: true` pada paper-trader.yml → setiap
+   dispatch baru MEMBATALKAN run yang hampir selesai, tepat sebelum langkah
+   "Simpan state ke branch bot-state".
+2. Double-dispatch per siklus: Paper Trader mengirim self-dispatch
+   workflow_dispatch DAN tick watchdog `self-loop` yang memicu dispatch kedua.
+   Dua sumber pemicu = dua run beruntun = saling batalkan (bug #1).
+
+### Perbaikan (commit `2412cba`)
+- `paper-trader.yml`: `cancel-in-progress: false`; rantai loop kini SATU
+  mekanisme saja — self-dispatch via secret `BOT_PAT`. Tick `self-loop`
+  dihapus dari akhir siklus.
+- `watchdog.yml`: tick `self-loop` (sisa antrian lama) diabaikan; Watchdog
+  kembali menjadi murni penjaga — dispatch hanya bila umur run ≥ 25 menit.
+- `main.py run_scan_loop`: cek deadline SEBELUM tidur; loop berhenti rapi
+  ~60 detik sebelum `--max-minutes` sehingga state selalu tersimpan; grace
+  15s setelah siklus error agar satu kegagalan tak langsung mengakhiri run.
+
+### Verifikasi (data aktual GitHub Actions, tanpa trigger manual oleh tim dev)
+- Run #38523643379: `completed success` — langkah "Simpan state" sukses;
+  snapshot bot-state `2026-10-14T07:01:23Z` tercatat.
+- Run #38525702405 (rantai otomatis berikutnya): `completed success`;
+  snapshot bot-state `2026-10-14T07:20:20Z` — rantai self-dispatch terbukti
+  menyambung sendiri TANPA pembatalan, 1 run aktif per waktu.
+- pytest 19/19 lulus pasca-perubahan; scan live end-to-end lokal OK.
+
+---
+
+## ⏭️ Langkah berikutnya
+- [ ] Pantau `[SUMMARY]`/`[FUNNEL]` di log Actions beberapa siklus; jika
+      `entry-siap>0` tapi `exec-gagal>0`, alasan kini eksplisit di `[EXEC]`.
+- [ ] Bersihkan `FutureWarning` indexing Series (`.iloc[i]`) — cosmetic.
+- [ ] Alihkan `evolve` dari data sintetis fallback ke data historis asli
+      (kualitas evolusi; tidak terbukti menjadi penyebab 0 transaksi).
+- [ ] Setelah ≥100 trade selesai & equity curve paper profit konsisten
+      (drawdown < 10% selama 1 bulan): uji uang real nominal kecil sesuai
+      roadmap keamanan di README.
+- [ ] Jika repo diprivatek: Pages butuh alternatif (artifact dashboard).
+
+## 🔐 Catatan keamanan
+- Token PAT lama (diawali `ghp_kQ`, tersimpan aman tanpa nilai penuh) terekspos
+  WAJIB revoke. Workflow Actions memakai `GITHUB_TOKEN` bawaan + secret
+  `BOT_PAT` baru (self-dispatch), tidak membutuhkan token itu.
+- API key Indodax real (jika nanti go-live): izin TRADE saja, JANGAN withdraw.
+
+---
+
+# 📌 Checkpoint 2026-10-15 — FIX "reject jauh lebih banyak daripada open"
+
+## Akar masalah (terbukti dari kode, repro teruji)
+1. **Gerbang `momentum_conflict` terlalu mencekik** (`scanner.opportunities`):
+   menolak SEMUA kandidat bullish hanya karena koreksi sehat 5 jam
+   (`mom5 < -0.5%`) padahal tren menengah naik — kandidat tipikal
+   (SOL sig=0.185 mom5=-0.6%) gugur massal.
+2. **Dead-gate dua arah**: scanner meloloskan dengan floor adaptif AI, tetapi
+   ambang entry `brain.entry_threshold` bisa lebih tinggi → kandidat yang
+   sudah dinyatakan lolos tetap ditolak senyap di tahap eksekusi.
+3. **Safety-net kesunyian beku**: `apply_silence_decay` hanya aktif saat TIDAK
+   ada trade DAN posisi → satu posisi menggantung membekukan jangkar selamanya
+   → gerbang tidak pernah melonggar → bot abadi reject tanpa belajar.
+4. **Prioritas antrian salah**: hasil scan diurut skor aditif → kandidat
+   ber-skor tinggi bersinyal lemah mendahului antrian lalu gugur di konfirmasi.
+
+## Perbaikan
+- `scanner.py`: momentum-conflict kini menolak HANYA koreksi dalam (> -1.5%)
+  DAN tren lemah (mom20≤0); sinyal kuat (≥2×floor) bypass; urutkan antrian
+  prioritas = sinyal terkuat dulu (skor pemecah seri).
+- `main.py`: thr entry = min(ambang-belajar-AI, floor scanner) — scanner satu-
+  satunya penjaga peluang, tidak memperketat kembali secara senyap.
+- `gates.py`: decay berbasis *entry terakhir*, bukan *total sunyi* — selama ≥4
+  jam tanpa posisi baru, AI berlatih memberanikan diri meski ada posisi lama.
+
+## Bukti sebelum/sesudah (data kandidat nyata dari log)
+- Sebelum: SOL/XRP/BNB-type kandidat → 0 lolos (semua `momentum_conflict`).
+- Sesudah: SOL, XRP, BNB lolos; DOGE-type (koreksi dalam + tren lemah) tetap
+  ditolak benar. Repro: `tests/test_pipeline.py::test_*momentum*`.
+
+## Tes
+- pytest **36/36 lulus** (baru: shallow-pullback lolos, strong-bypass,
+  silence-decay dgn posisi basi, decay-jeda-setelah-entry).
+- Scan live end-to-end OK; funnel `[SUMMARY]/[FUNNEL]` mencatat semua tahap.
+
+## Catatan
+- Mode tetap PAPER ONLY; batas bawah aman gerbang (ENTRY_THR_MIN dll.) tidak
+  disentuh; fee/likuiditas/penolakan data sintetis tetap utuh.
+
+---
+
+## ✅ 2026-10-17 — Audit "Bot tidak belajar dari 32 trade paper trading" (SELESAI)
+
+### Akar masalah (terbukti dari data state live `bot-state`, bukan spekulasi)
+**Ratchet asimetris pada adaptive threshold**: setiap LOSS menaikkan
+`entry_threshold` +0.02 flat tanpa pandang bulu; penurunan HANYA bisa datang
+dari PROFIT (-0.01). Dengan riwayat nyata 5W/27L (WR 18%), threshold mengunci
+di cap 0.45 — level yang secara matematis hampir tak pernah tercapai di pasar
+sideways → reject massal → pengalaman berhenti masuk → pembelajaran mandek.
+Analogi persis "manusia takut kehilangan Rp50rb": makin rugi makin takut,
+makin takut makin sedikit belajar, makin sedikit belajar makin tidak mampu
+profit untuk melepas rasa takut. Lingkaran setan.
+
+Bukti: `brain.json` live = entry_threshold 0.45 (persis cap), lessons buffer
+menampilkan "entry_threshold dinaikkan -> 0.45" berulang pada 8 trade terakhir;
+simulasi replay kode lama atas 32 trade nyata: threshold tetap 0.45 selamanya.
+
+### Perbaikan (`ai_trader/learning.py`)
+| Perubahan | Alasan |
+|---|---|
+| Kenaikan akibat loss mengecil seiring jumlah loss: `bump = max(0.005, 0.02·10/max(10,n_loss))` | Kapok boleh, membeku jangan. Loss ke-N tak lagi menaikkan penuh. |
+| Relief threshold (-0.005) juga diberikan pada **loss terkontrol** (\|pnl\| ≤ 1.2×stop_loss, saat WR<50%) | Rugi kecil sesuai rencana = sistem bekerja benar; hanya loss tembus-SL yang menaikkan kewaspadaan. Penurunan tidak lagi bergantung 100% pada profit. |
+| Cap pakai konstanta `ENTRY_THR_MAX` (0.45), floor `ENTRY_THR_MIN` (0.10) | Konsistensi gates ↔ learning. |
+
+Yang TIDAK diubah: bobot per-indikator credit-assignment, safety-net silence
+decay, batas risiko (SL/TP/alloc/MAX_POSITIONS), fee, mode PAPER ONLY.
+
+### Bukti hasil (dijalankan nyata)
+Replay 32 trade dengan komposisi sama seperti riwayat live (7 win +0.8%,
+25 loss terkontrol -0.6%/-0.9%) dimulai dari brain live saat ini (thr=0.45):
+- Kode LAMA : threshold akhir **0.45** (terkunci — bot abadi menolak)
+- Kode BARU : threshold akhir **0.34** dan terus turun menuju ekuilibrium
+  sehat → kandidat kembali lolos gerbang → pengalaman mengalir lagi.
+- pytest: **36/36 lulus**.
+
+### Catatan jujur
+- Ekuitas live saat audit: kas Rp7.720.612 + 1 posisi BTC terbuka; realized
+  PnL -Rp424.459 dari 32 trade (WR 21,9%). Ini fase pengumpulan pengalaman,
+  BUKAN dasar keputusan go-live (roadmap: ≥100 trade & kurva stabil).
+- Perlu dipantau 1–2 hari ke depan: `entry_threshold` di `brain.json` harus
+  mulai menurun < 0.45 dan frekuensi `[EXEC] OK` naik. Jika masih nol trade
+  setelah threshold turun, kandidat berikutnya adalah kondisi pasar ekstrem.
